@@ -122,38 +122,31 @@ This app works best as part of a longer writing process. Generate drafts _elsewh
 
 ## Editing an existing document (custom fork)
 
-This fork includes an experimental **Edit Existing Document** mode. It modifies
-the text of an already populated document, rather than typing the entire source
-again. Normal one-, two-, and three-draft modes are unchanged.
+This fork includes an experimental **Edit Existing Document** mode. It applies
+the original edit-diff engine to text already present in a document instead
+of retyping the whole source. Normal one-, two-, and three-draft modes are
+unchanged.
 
-1. **Back up the document.** Turn off autocorrect in the target application.
-2. Copy all the existing document text into **Current Document** (first editor).
-   Paste the desired final text into **Target Document** (second editor).
-3. Enable **Edit Existing Document**, click **Start Editing**, and switch into
-   the existing document's editable text area during the 10-second countdown.
-4. The app uses Cmd+A/Cmd+C to capture the document. Comparison tolerates
-   only equivalent line endings (CRLF vs LF) and nonbreaking-space representations,
-   provided the number of character positions and line-break positions are
-   unchanged. Your clipboard is replaced by this copy.
-5. The app **does not** discard blank paragraphs, leading or trailing spaces,
-   tabs, or other characters to force a match. On mismatch, it reports the
-   first differing character, Unicode code point, line, column, and character
-   counts, and stops without editing.
-6. If verification succeeds, the app uses the **actual copied text** as the
-   source and applies insertions, deletions, and replacements right to left.
-   The original per-edit internal snapshot checks remain unchanged.
+1. **Make a duplicate or backup first** and disable autocorrect.
+2. Copy the document's **entire current text** into **Current Document** in
+   Watch Me Type. Paste the desired full revision into **Target Document**.
+3. Enable **Edit Existing Document**, click **Start Editing**, and during the
+   10-second countdown switch to the existing document and click *inside its
+   editable text* (not the browser toolbar).
+4. The app records the target application's identity, sends **Cmd+Down** to
+   move the caret to the document end, then runs the original right-to-left
+   edit engine. **It does not use Cmd+A/Cmd+C or check the clipboard.**
+5. Review the edited document carefully afterward.
 
-To run the independent normalization checks from the repository root:
-`bash scripts/verify-document-snapshot.sh`.
-
-**Limitations:** This is an experimental feature. It only works when Cmd+A
-selects the full document text, Cmd+C returns matching plain text, and keyboard
-arrow navigation follows the text's character boundaries. Google Docs behavior
-can vary by browser, formatting, embedded objects, comments, suggestion mode,
-and smart punctuation. The initial content check and existing internal
-snapshots do not guarantee that the editor will apply every later keyboard
-event correctly. Make a copy and test on a short plain-text document before
-using an important file. Do not interact with the target editor during the run.
+**Important risks:** This mode *trusts* that Current Document matches the
+actual text and that Cmd+Down moves to the actual end. The original internal
+snapshot checks do **not** read the Google Doc to verify edits. Mismatched
+characters, rich-text elements, manual page breaks, unexpected keyboard
+navigation, or auto-corrections may cause offsets or incorrect changes.
+Target-app focus is monitored, but if the window title is inaccessible the
+app cannot distinguish between tabs or windows of that application. Only
+use this on a disposable copy until you have confirmed it works in your
+specific editor.
 
 ## Build from source
 
