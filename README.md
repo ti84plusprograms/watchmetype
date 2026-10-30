@@ -120,6 +120,33 @@ Tests under `Watch Me TypeTests/` cover `EditOperationConverter` (tokenisation, 
 
 This app works best as part of a longer writing process. Generate drafts _elsewhere_, then use Watch Me Type to reproduce how writing normally appears over time (Draft 1) and, if needed, to stage a believable revision into Draft 2 and an optional polish pass into Draft 3.
 
+## Editing an existing document (custom fork)
+
+This fork includes an experimental **Edit Existing Document** mode. It modifies
+the text of an already populated document, rather than typing the entire source
+again. Normal one-, two-, and three-draft modes are unchanged.
+
+1. **Back up the document.** Turn off autocorrect in the target application.
+2. Copy all the existing document text into **Current Document** (first editor).
+   Paste the desired final text into **Target Document** (second editor).
+3. Enable **Edit Existing Document**, click **Start Editing**, and switch into
+   the existing document's editable text area during the 10-second countdown.
+4. The app uses Cmd+A/Cmd+C to capture the document and checks that the copied
+   plain text matches Current Document **exactly**. This temporarily replaces
+   your clipboard contents. If the copy or comparison fails, no edits are made.
+5. If the verification succeeds, the app collapses the selection at the end and
+   applies only the calculated insertions, deletions, and replacements from
+   right to left.
+
+**Limitations:** This is an experimental feature. It only works when Cmd+A
+selects the full document text, Cmd+C returns matching plain text, and keyboard
+arrow navigation follows the text's character boundaries. Google Docs behavior
+can vary by browser, formatting, embedded objects, comments, suggestion mode,
+and smart punctuation. The initial content check and existing internal
+snapshots do not guarantee that the editor will apply every later keyboard
+event correctly. Make a copy and test on a short plain-text document before
+using an important file. Do not interact with the target editor during the run.
+
 ## Build from source
 
 ```bash
