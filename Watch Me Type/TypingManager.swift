@@ -305,7 +305,15 @@ final class TypingManager: NSObject, ObservableObject {
         extraDelayPerEdit = 0
         progressFraction = 0.0
         lastEditingError = nil
+        draft1Text = nil
+        draft2Text = nil
         draft3Text = nil
+        editingDocumentText = nil
+        positionedEdits = []
+        currentEditIndex = 0
+        actualCursorPosition = 0
+        editDirection = .rightToLeft
+        customEditingDuration = nil
         customEditingDuration2 = nil
         editPositionOffset = 0
     }
