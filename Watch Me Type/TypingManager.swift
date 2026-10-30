@@ -359,6 +359,18 @@ final class TypingManager: NSObject, ObservableObject {
             return
         }
         let sourceText = String(textToType)
+
+        // Xcode-built copies and downloaded releases can have different
+        // Accessibility authorization. A running UI does not imply that
+        // macOS will deliver synthetic keyboard events to another app.
+        guard AccessibilityPermissionHelper.isTrusted else {
+            abortEditingWithError(.unexpectedState(
+                "This build of Watch Me Type is not authorized in macOS Accessibility settings. " +
+                "Grant access to the copy you are running from Xcode, then quit and relaunch it. No edits were made."
+            ))
+            return
+        }
+
         guard let targetApp = NSWorkspace.shared.frontmostApplication else {
             abortEditingWithError(.unexpectedState(
                 "Could not identify the frontmost app. Activate the target document during the countdown."
