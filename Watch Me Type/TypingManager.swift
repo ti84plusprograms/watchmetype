@@ -347,9 +347,12 @@ final class TypingManager: NSObject, ObservableObject {
         )
     }
 
-    /// Verify the document we will edit before issuing any destructive events.
-    /// Cmd+C replaces the general pasteboard. An exact plain-text match is
-    /// deliberately required, rather than guessing around formatting changes.
+    /// Start the original editing engine against text already present in the
+    /// focused editor. This deliberately skips clipboard-based verification.
+    ///
+    /// IMPORTANT: The supplied current text and the actual editor contents MUST
+    /// match. The editing engine tracks a model and cannot detect unexpected
+    /// page-break objects or offset drift in the live document.
     private func beginEditingExistingDocument() {
         guard let targetText = draft2Text else {
             stopTyping()
@@ -358,103 +361,55 @@ final class TypingManager: NSObject, ObservableObject {
         let sourceText = String(textToType)
         guard let targetApp = NSWorkspace.shared.frontmostApplication else {
             abortEditingWithError(.unexpectedState(
-                "Could not identify the frontmost app. Activate the document editor during the countdown."
+                "Could not identify the frontmost app. Activate the target document during the countdown."
             ))
             return
         }
 
-        // Never select all in our own editor if the user did not switch apps.
+        // Never issue a document-editing shortcut to our own application.
         guard targetApp.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
             abortEditingWithError(.unexpectedState(
-                "Watch Me Type is still the active app. During the countdown, switch to the destination document and click inside its editable text."
+                "Watch Me Type is still active. Switch to the destination document and click inside its editable text during the countdown."
             ))
             return
         }
 
         targetAppPID = targetApp.processIdentifier
-        // Some browsers do not expose an AX window title. In that case, the
-        // focus guard tracks the app PID and the following clipboard check
-        // must verify the document's *complete* text before editing starts.
         targetWindowTitle = getFocusedWindowTitle()
         if targetWindowTitle == nil {
-            appLog("No Accessibility window title for \(targetApp.localizedName ?? "target app"); using PID and exact document text verification", level: .warning)
+            appLog("No Accessibility window title for target app; monitoring app focus", level: .warning)
         }
 
         state = .editing
-        progressText = "Verifying existing document text…"
+        progressText = "Positioning cursor at the end of the existing document…"
         typingStartDate = Date()
         beginSleepPrevention()
 
-        // Require a new pasteboard change to avoid trusting stale copied text.
-        let clipboardBeforeCopy = NSPasteboard.general.changeCount
-        sendCommandShortcut(0x00) // Cmd+A selects everything in the focused editor
+        // macOS Command+Down moves to the end of the current editing document
+        // in supported text editors. Unlike select-all/copy, this does not
+        // modify the document or clipboard.
+        guard isTargetWindowFocused() else {
+            abortEditingWithError(.focusLostDuringEdit)
+            return
+        }
+        sendCommandShortcut(0x7D) // Cmd+Down
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self, self.state == .editing else { return }
             guard self.isTargetWindowFocused() else {
                 self.abortEditingWithError(.focusLostDuringEdit)
                 return
             }
 
-            self.sendCommandShortcut(0x08) // Cmd+C copies the selection
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.70) { [weak self] in
-                guard let self, self.state == .editing else { return }
-                guard self.isTargetWindowFocused() else {
-                    self.abortEditingWithError(.focusLostDuringEdit)
-                    return
-                }
-
-                let pasteboard = NSPasteboard.general
-                let actualText = pasteboard.string(forType: .string)
-                let freshCopy = pasteboard.changeCount > clipboardBeforeCopy
-
-                // Collapse the selection without deleting it, even if verification fails.
-                self.sendArrowKey(.right)
-
-                guard freshCopy else {
-                    self.abortEditingWithError(.unexpectedState(
-                        "The clipboard did not change after the app tried Cmd+A/Cmd+C. " +
-                        "Make sure the document editor has keyboard focus during the countdown. " +
-                        "If manual Cmd+A then Cmd+C works in the document, the automated shortcut may not be reaching it. No edits were made."
-                    ))
-                    return
-                }
-                guard let actualText else {
-                    self.abortEditingWithError(.unexpectedState(
-                        "The target app did not copy plain text. No edits were made."
-                    ))
-                    return
-                }
-
-                // Normalize only equivalent representations. Never discard
-                // blank lines, indentation, or trailing characters to force
-                // a match: that would silently shift keyboard edit positions.
-                switch DocumentSnapshotVerifier.check(expected: sourceText, copied: actualText) {
-                case .exact:
-                    break
-                case .normalized:
-                    appLog("Document verification accepted equivalent line endings or nonbreaking spaces", level: .info)
-                case .mismatch(let details):
-                    self.abortEditingWithError(.unexpectedState(details))
-                    return
-                }
-
-                // After Cmd+A, Right puts the caret at the document's end.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-                    guard let self, self.state == .editing else { return }
-                    guard self.isTargetWindowFocused() else {
-                        self.abortEditingWithError(.focusLostDuringEdit)
-                        return
-                    }
-                    self.editExistingDocumentMode = false
-                    self.startEditing(
-                        draft1: actualText,
-                        draft2: targetText,
-                        customDuration: self.customEditingDuration
-                    )
-                }
-            }
+            // From here, execute the original right-to-left diff engine with
+            // the user's declared source text. It assumes that Cmd+Down placed
+            // the caret at the true end and that source text matches exactly.
+            self.editExistingDocumentMode = false
+            self.startEditing(
+                draft1: sourceText,
+                draft2: targetText,
+                customDuration: self.customEditingDuration
+            )
         }
     }
 
