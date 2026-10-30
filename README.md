@@ -120,6 +120,46 @@ Tests under `Watch Me TypeTests/` cover `EditOperationConverter` (tokenisation, 
 
 This app works best as part of a longer writing process. Generate drafts _elsewhere_, then use Watch Me Type to reproduce how writing normally appears over time (Draft 1) and, if needed, to stage a believable revision into Draft 2 and an optional polish pass into Draft 3.
 
+## Editing an existing document (custom fork)
+
+This fork includes an experimental **Edit Existing Document** mode. It applies
+the original edit-diff engine to text already present in a document instead
+of retyping the whole source. Normal one-, two-, and three-draft modes are
+unchanged.
+
+1. **Make a duplicate or backup first** and disable autocorrect.
+2. Copy the document's **entire current text** into **Current Document** in
+   Watch Me Type. Paste the desired full revision into **Target Document**.
+3. Enable **Edit Existing Document**, click **Start Editing**, and during the
+   10-second countdown switch to the existing document and click *inside its
+   editable text* (not the browser toolbar).
+4. The app records the target application's identity, sends **Cmd+Down** to
+   move the caret to the document end, then runs the original right-to-left
+   edit engine. **It does not use Cmd+A/Cmd+C or check the clipboard.**
+5. While navigating, the compact overlay displays the current edit number,
+   direction, and how many cursor moves have been sent. A long document can
+   require many minutes before the first visible change because navigation
+   uses individual arrow presses (about 0.08 seconds per character).
+6. Review the edited document carefully afterward.
+
+**Debugging:** First test with a short disposable document containing a
+single replacement near its end. If the overlay shows "Navigating" and its
+counter is advancing, the app is issuing arrow events; this does not itself
+prove the editor is receiving them. If the counter reaches its target without
+changes, the target editor may not have keyboard focus or its cursor behavior
+may differ from the app's assumptions. Do not start with a large or important
+document until that short test works.
+
+**Important risks:** This mode *trusts* that Current Document matches the
+actual text and that Cmd+Down moves to the actual end. The original internal
+snapshot checks do **not** read the Google Doc to verify edits. Mismatched
+characters, rich-text elements, manual page breaks, unexpected keyboard
+navigation, or auto-corrections may cause offsets or incorrect changes.
+Target-app focus is monitored, but if the window title is inaccessible the
+app cannot distinguish between tabs or windows of that application. Only
+use this on a disposable copy until you have confirmed it works in your
+specific editor.
+
 ## Build from source
 
 ```bash

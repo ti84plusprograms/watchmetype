@@ -107,6 +107,7 @@ final class TypingManager: NSObject, ObservableObject {
     
     // Focus tracking - track specific window, not just app
     private var targetWindowTitle: String?
+    private var editExistingDocumentMode: Bool = false
     private var targetAppPID: pid_t?  // Keep as backup for window title comparison
 
     // Global Esc key handling
@@ -180,8 +181,10 @@ final class TypingManager: NSObject, ObservableObject {
         wpm: Int,
         countdown: Int = 10,
         totalDurationSeconds: TimeInterval? = nil,
-        simulateMistakes: Bool = false
+        simulateMistakes: Bool = false,
+        editExistingDocument: Bool = false
     ) {
+        editExistingDocumentMode = editExistingDocument
         // Reset any existing timers/state
         countdownTimer?.invalidate()
         typingWorkItem?.cancel()
@@ -260,7 +263,11 @@ final class TypingManager: NSObject, ObservableObject {
                     self.countdownRemaining -= 1
                 } else {
                     timer.invalidate()
-                    self.beginTypingLoop()
+                    if self.editExistingDocumentMode {
+                        self.beginEditingExistingDocument()
+                    } else {
+                        self.beginTypingLoop()
+                    }
                 }
             }
         }
@@ -288,6 +295,7 @@ final class TypingManager: NSObject, ObservableObject {
         isThinking = false
         targetAppPID = nil
         targetWindowTitle = nil
+        editExistingDocumentMode = false
         stateBeforePause = nil
         lastCompletionDate = nil
         lastTypingPhaseDuration = nil
@@ -297,11 +305,125 @@ final class TypingManager: NSObject, ObservableObject {
         extraDelayPerEdit = 0
         progressFraction = 0.0
         lastEditingError = nil
+        draft1Text = nil
+        draft2Text = nil
         draft3Text = nil
+        editingDocumentText = nil
+        positionedEdits = []
+        currentEditIndex = 0
+        actualCursorPosition = 0
+        editDirection = .rightToLeft
+        customEditingDuration = nil
         customEditingDuration2 = nil
         editPositionOffset = 0
     }
     
+
+    // MARK: - Edit an already populated document
+
+    /// Start directly in editing mode without typing the source from scratch.
+    /// The focused editor must expose its complete text through Cmd+A/Cmd+C.
+    func startEditingExistingDocument(
+        currentText: String,
+        targetText: String,
+        wpm: Int,
+        countdown: Int = 10,
+        editingDuration: TimeInterval? = nil
+    ) {
+        guard !currentText.isEmpty, !targetText.isEmpty else {
+            progressText = "Current and target document text are both required."
+            return
+        }
+        draft2Text = targetText
+        draft3Text = nil
+        customEditingDuration = editingDuration
+        customEditingDuration2 = nil
+        startTyping(
+            text: currentText,
+            wpm: wpm,
+            countdown: countdown,
+            simulateMistakes: false,
+            editExistingDocument: true
+        )
+    }
+
+    /// Start the original editing engine against text already present in the
+    /// focused editor. This deliberately skips clipboard-based verification.
+    ///
+    /// IMPORTANT: The supplied current text and the actual editor contents MUST
+    /// match. The editing engine tracks a model and cannot detect unexpected
+    /// page-break objects or offset drift in the live document.
+    private func beginEditingExistingDocument() {
+        guard let targetText = draft2Text else {
+            stopTyping()
+            return
+        }
+        let sourceText = String(textToType)
+
+        // Xcode-built copies and downloaded releases can have different
+        // Accessibility authorization. A running UI does not imply that
+        // macOS will deliver synthetic keyboard events to another app.
+        guard AccessibilityPermissionHelper.isTrusted else {
+            abortEditingWithError(.unexpectedState(
+                "This build of Watch Me Type is not authorized in macOS Accessibility settings. " +
+                "Grant access to the copy you are running from Xcode, then quit and relaunch it. No edits were made."
+            ))
+            return
+        }
+
+        guard let targetApp = NSWorkspace.shared.frontmostApplication else {
+            abortEditingWithError(.unexpectedState(
+                "Could not identify the frontmost app. Activate the target document during the countdown."
+            ))
+            return
+        }
+
+        // Never issue a document-editing shortcut to our own application.
+        guard targetApp.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            abortEditingWithError(.unexpectedState(
+                "Watch Me Type is still active. Switch to the destination document and click inside its editable text during the countdown."
+            ))
+            return
+        }
+
+        targetAppPID = targetApp.processIdentifier
+        targetWindowTitle = getFocusedWindowTitle()
+        if targetWindowTitle == nil {
+            appLog("No Accessibility window title for target app; monitoring app focus", level: .warning)
+        }
+
+        state = .editing
+        progressText = "Positioning cursor at the end of the existing document…"
+        typingStartDate = Date()
+        beginSleepPrevention()
+
+        // macOS Command+Down moves to the end of the current editing document
+        // in supported text editors. Unlike select-all/copy, this does not
+        // modify the document or clipboard.
+        guard isTargetWindowFocused() else {
+            abortEditingWithError(.focusLostDuringEdit)
+            return
+        }
+        sendCommandShortcut(0x7D) // Cmd+Down
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self, self.state == .editing else { return }
+            guard self.isTargetWindowFocused() else {
+                self.abortEditingWithError(.focusLostDuringEdit)
+                return
+            }
+
+            // From here, execute the original right-to-left diff engine with
+            // the user's declared source text. It assumes that Cmd+Down placed
+            // the caret at the true end and that source text matches exactly.
+            self.startEditing(
+                draft1: sourceText,
+                draft2: targetText,
+                customDuration: self.customEditingDuration
+            )
+        }
+    }
+
     // MARK: - Private typing logic
     
     private func beginTypingLoop() {
@@ -994,6 +1116,22 @@ final class TypingManager: NSObject, ObservableObject {
         keyUp.post(tap: .cghidEventTap)
     }
 
+    /// Issue one Command-key shortcut in the currently focused editor.
+    /// Maintain the modifier on the key-up event so the receiving app sees
+    /// one consistent keyboard shortcut, rather than a modified key-down and
+    /// an unmodified key-up.
+    private func sendCommandShortcut(_ keyCode: CGKeyCode) {
+        let source = CGEventSource(stateID: .hidSystemState)
+        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+            return
+        }
+        keyDown.flags = .maskCommand
+        keyUp.flags = .maskCommand
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
+    }
+
     private func sendArrowKey(_ direction: ArrowDirection, withModifier modifier: KeyModifier? = nil) {
         let source = CGEventSource(stateID: .hidSystemState)
 
@@ -1153,8 +1291,8 @@ final class TypingManager: NSObject, ObservableObject {
 
         // Step 2: Initialize editing state
         state = .editing
-        progressText = "Editing Draft 1 into Draft 2…"
-        progressFraction = (draft3Text != nil && !draft3Text!.isEmpty) ? 0.33 : 0.5
+        progressText = "Preparing the revision plan…"
+        progressFraction = editExistingDocumentMode ? 0.0 : ((draft3Text != nil && !draft3Text!.isEmpty) ? 0.33 : 0.5)
         isThinking = false
         currentEditIndex = 0
         actualCursorPosition = draft1.count // Cursor starts at end of draft1
@@ -1375,6 +1513,13 @@ final class TypingManager: NSObject, ObservableObject {
         }
 
         let moveDistance = actualCursorPosition - navigationTarget
+        let remaining = abs(moveDistance)
+        let estimatedNavigationSeconds = Int(ceil(Double(remaining) * 0.08 * editingDelayMultiplier))
+        if remaining > 0 {
+            progressText = "Navigating \(remaining) characters to edit \(currentEditIndex + 1)/\(positionedEdits.count) (approximately \(estimatedNavigationSeconds / 60)m \(estimatedNavigationSeconds % 60)s)…"
+        } else {
+            progressText = "Applying edit \(currentEditIndex + 1)/\(positionedEdits.count)…"
+        }
 
         if moveDistance > 0 {
             appLog("Moving left: \(moveDistance) characters to position \(navigationTarget)", level: .debug)
@@ -1394,9 +1539,14 @@ final class TypingManager: NSObject, ObservableObject {
     /// Navigate right by arrow keys
     private func navigateRightAndExecute(count: Int, edit: EditWithPosition) {
         let navigationDelay = 0.08 * editingDelayMultiplier
-        sendKeysWithDelay(count: count, delay: navigationDelay) {
+        sendKeysWithDelay(count: count, delay: navigationDelay, keyAction: {
             self.sendArrowKey(.right)
-        } completion: { [weak self] in
+        }, progress: { [weak self] completed in
+            guard let self else { return }
+            if completed % 50 == 0 || completed == count {
+                self.progressText = "Navigating right: \(completed)/\(count) characters to edit \(self.currentEditIndex + 1)/\(self.positionedEdits.count)"
+            }
+        }, completion: { [weak self] in
             guard let self = self, self.state == .editing else { return }
 
             let postNavigationDelay = 0.3 * self.editingDelayMultiplier
@@ -1404,15 +1554,20 @@ final class TypingManager: NSObject, ObservableObject {
                 guard let self = self, self.state == .editing else { return }
                 self.executeEditAtCurrentPosition(edit)
             }
-        }
+        })
     }
 
     /// Navigate left by arrow keys
     private func navigateLeftAndExecute(count: Int, edit: EditWithPosition) {
         let navigationDelay = 0.08 * editingDelayMultiplier
-        sendKeysWithDelay(count: count, delay: navigationDelay) {
+        sendKeysWithDelay(count: count, delay: navigationDelay, keyAction: {
             self.sendArrowKey(.left)
-        } completion: { [weak self] in
+        }, progress: { [weak self] completed in
+            guard let self else { return }
+            if completed % 50 == 0 || completed == count {
+                self.progressText = "Navigating left: \(completed)/\(count) characters to edit \(self.currentEditIndex + 1)/\(self.positionedEdits.count)"
+            }
+        }, completion: { [weak self] in
             guard let self = self, self.state == .editing else { return }
 
             // Short pause after navigation before editing
@@ -1421,7 +1576,7 @@ final class TypingManager: NSObject, ObservableObject {
                 guard let self = self, self.state == .editing else { return }
                 self.executeEditAtCurrentPosition(edit)
             }
-        }
+        })
     }
 
     /// Executes a single edit operation (delete, insert, or replace) at the current cursor position.
@@ -1432,6 +1587,7 @@ final class TypingManager: NSObject, ObservableObject {
             ? edit.position + editPositionOffset
             : edit.position
 
+        progressText = "Applying edit \(currentEditIndex + 1)/\(positionedEdits.count)…"
         switch edit.operation {
         case .delete(let count, let expectedText):
             guard verifyExpectedText(expected: expectedText, at: adjustedPosition, length: count) else {
@@ -1441,9 +1597,15 @@ final class TypingManager: NSObject, ObservableObject {
 
             appLog("Deleting \(count) characters with backspace (from end)", level: .debug)
             let backspaceDelay = 0.1 * editingDelayMultiplier
-            sendKeysWithDelay(count: count, delay: backspaceDelay) {
+            progressText = "Deleting 0/\(count) characters in edit \(currentEditIndex + 1)/\(positionedEdits.count)…"
+            sendKeysWithDelay(count: count, delay: backspaceDelay, keyAction: {
                 self.sendBackspace()
-            } completion: { [weak self] in
+            }, progress: { [weak self] completed in
+                guard let self else { return }
+                if completed % 10 == 0 || completed == count {
+                    self.progressText = "Deleting \(completed)/\(count) characters in edit \(self.currentEditIndex + 1)/\(self.positionedEdits.count)…"
+                }
+            }, completion: { [weak self] in
                 guard let self = self, self.state == .editing else { return }
                 self.actualCursorPosition = adjustedPosition
                 if self.editDirection == .leftToRight {
@@ -1463,6 +1625,7 @@ final class TypingManager: NSObject, ObservableObject {
             appLog("Inserting '\(text.prefix(20))\(text.count > 20 ? "..." : "")'", level: .debug)
             let baseDelay = max(0.05, interCharacterDelay)
             let delay = baseDelay * editingDelayMultiplier
+            progressText = "Inserting 0/\(text.count) characters in edit \(currentEditIndex + 1)/\(positionedEdits.count)…"
             sendCharactersWithDelay(text, delay: delay) { [weak self] in
                 guard let self = self, self.state == .editing else { return }
                 self.actualCursorPosition = adjustedPosition + text.count
@@ -1485,6 +1648,7 @@ final class TypingManager: NSObject, ObservableObject {
             }
             appLog("Replacing \(oldCount) chars with '\(newText.prefix(30))\(newText.count > 30 ? "..." : "")'", level: .debug)
 
+            progressText = "Replacing \(oldCount) characters with \(newText.count) characters in edit \(currentEditIndex + 1)/\(positionedEdits.count)…"
             executeReplace(oldCount: oldCount, newText: newText) { [weak self] in
                 guard let self = self, self.state == .editing else { return }
                 self.actualCursorPosition = adjustedPosition + newText.count
@@ -1523,6 +1687,7 @@ final class TypingManager: NSObject, ObservableObject {
                 return
             }
 
+            self.progressText = "Replacement insertion 0/\(newText.count) in edit \(self.currentEditIndex + 1)/\(self.positionedEdits.count)…"
             self.sendCharactersWithDelay(newText, delay: baseDelay) { [weak self] in
                 guard let self = self, self.state == .editing else { return }
 
@@ -1535,9 +1700,15 @@ final class TypingManager: NSObject, ObservableObject {
 
         // Delete first using backspace (we're at the END of the text), then insert.
         if oldCount > 0 {
-            self.sendKeysWithDelay(count: oldCount, delay: backspaceDelay) {
+            progressText = "Replacement deletion 0/\(oldCount) in edit \(currentEditIndex + 1)/\(positionedEdits.count)…"
+            self.sendKeysWithDelay(count: oldCount, delay: backspaceDelay, keyAction: {
                 self.sendBackspace()
-            } completion: { [weak self] in
+            }, progress: { [weak self] completed in
+                guard let self else { return }
+                if completed % 10 == 0 || completed == oldCount {
+                    self.progressText = "Replacement deletion \(completed)/\(oldCount) in edit \(self.currentEditIndex + 1)/\(self.positionedEdits.count)…"
+                }
+            }, completion: { [weak self] in
                 guard let self = self, self.state == .editing else { return }
 
                 DispatchQueue.main.asyncAfter(deadline: .now() + postDeleteDelay) { [weak self] in
@@ -1553,11 +1724,15 @@ final class TypingManager: NSObject, ObservableObject {
     /// Completes the current edit and moves to the next one
     private func completeCurrentEdit() {
         currentEditIndex += 1
+        progressText = "Finished edit \(currentEditIndex) of \(positionedEdits.count)"
 
         // Update progress
         let editProgress = Double(currentEditIndex) / Double(positionedEdits.count)
         DispatchQueue.main.async {
-            if self.draft3Text != nil && !self.draft3Text!.isEmpty {
+            if self.editExistingDocumentMode {
+                // There is no initial typing phase in this mode.
+                self.progressFraction = editProgress
+            } else if self.draft3Text != nil && !self.draft3Text!.isEmpty {
                 // Three phases: typing 0-0.33, edit1 0.33-0.66, edit2 0.66-1.0
                 switch self.editDirection {
                 case .rightToLeft:
@@ -1589,7 +1764,8 @@ final class TypingManager: NSObject, ObservableObject {
         }
     }
 
-    private func sendKeysWithDelay(count: Int, delay: TimeInterval, keyAction: @escaping () -> Void, completion: @escaping () -> Void) {
+    private func sendKeysWithDelay(count: Int, delay: TimeInterval, keyAction: @escaping () -> Void, progress: ((Int) -> Void)? = nil, completion: @escaping () -> Void) {
+        let totalCount = count
         var remaining = count
 
         func sendNext() {
@@ -1603,6 +1779,7 @@ final class TypingManager: NSObject, ObservableObject {
 
             keyAction()
             remaining -= 1
+            progress?(totalCount - remaining)
 
             if remaining > 0 {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -1694,6 +1871,9 @@ final class TypingManager: NSObject, ObservableObject {
 
         // Send the character (same as typing phase)
         sendCharacter(character)
+        if editExistingDocumentMode && (editCharIndex % 10 == 0 || editCharIndex == editCharsToType.count) {
+            progressText = "Inserting \(editCharIndex)/\(editCharsToType.count) characters in edit \(currentEditIndex + 1)/\(positionedEdits.count)…"
+        }
 
         // Temporarily set previousCharacter to editCharPreviousChar so extraDelay() uses the correct context
         let savedPreviousChar = previousCharacter
@@ -1790,6 +1970,7 @@ final class TypingManager: NSObject, ObservableObject {
 
                 self.progressFraction = 1.0
                 self.state = .idle
+                self.editExistingDocumentMode = false
                 self.lastCompletionDate = Date()
                 self.progressText = "Editing complete."
                 self.isThinking = false
@@ -1903,6 +2084,7 @@ final class TypingManager: NSObject, ObservableObject {
             self.progressText = "Editing aborted. Use Cmd+Z to undo changes."
             self.progressFraction = Double(self.currentEditIndex) / Double(max(1, self.positionedEdits.count))
             self.lastEditingError = error
+            self.editExistingDocumentMode = false
             self.targetAppPID = nil
             self.targetWindowTitle = nil
 
