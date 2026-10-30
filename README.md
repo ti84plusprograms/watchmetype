@@ -131,12 +131,20 @@ again. Normal one-, two-, and three-draft modes are unchanged.
    Paste the desired final text into **Target Document** (second editor).
 3. Enable **Edit Existing Document**, click **Start Editing**, and switch into
    the existing document's editable text area during the 10-second countdown.
-4. The app uses Cmd+A/Cmd+C to capture the document and checks that the copied
-   plain text matches Current Document **exactly**. This temporarily replaces
-   your clipboard contents. If the copy or comparison fails, no edits are made.
-5. If the verification succeeds, the app collapses the selection at the end and
-   applies only the calculated insertions, deletions, and replacements from
-   right to left.
+4. The app uses Cmd+A/Cmd+C to capture the document. Comparison tolerates
+   only equivalent line endings (CRLF vs LF) and nonbreaking-space representations,
+   provided the number of character positions and line-break positions are
+   unchanged. Your clipboard is replaced by this copy.
+5. The app **does not** discard blank paragraphs, leading or trailing spaces,
+   tabs, or other characters to force a match. On mismatch, it reports the
+   first differing character, Unicode code point, line, column, and character
+   counts, and stops without editing.
+6. If verification succeeds, the app uses the **actual copied text** as the
+   source and applies insertions, deletions, and replacements right to left.
+   The original per-edit internal snapshot checks remain unchanged.
+
+To run the independent normalization checks from the repository root:
+`bash scripts/verify-document-snapshot.sh`.
 
 **Limitations:** This is an experimental feature. It only works when Cmd+A
 selects the full document text, Cmd+C returns matching plain text, and keyboard
