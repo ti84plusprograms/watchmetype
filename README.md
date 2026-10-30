@@ -136,7 +136,19 @@ unchanged.
 4. The app records the target application's identity, sends **Cmd+Down** to
    move the caret to the document end, then runs the original right-to-left
    edit engine. **It does not use Cmd+A/Cmd+C or check the clipboard.**
-5. Review the edited document carefully afterward.
+5. While navigating, the compact overlay displays the current edit number,
+   direction, and how many cursor moves have been sent. A long document can
+   require many minutes before the first visible change because navigation
+   uses individual arrow presses (about 0.08 seconds per character).
+6. Review the edited document carefully afterward.
+
+**Debugging:** First test with a short disposable document containing a
+single replacement near its end. If the overlay shows "Navigating" and its
+counter is advancing, the app is issuing arrow events; this does not itself
+prove the editor is receiving them. If the counter reaches its target without
+changes, the target editor may not have keyboard focus or its cursor behavior
+may differ from the app's assumptions. Do not start with a large or important
+document until that short test works.
 
 **Important risks:** This mode *trusts* that Current Document matches the
 actual text and that Cmd+Down moves to the actual end. The original internal
