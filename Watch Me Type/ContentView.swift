@@ -474,7 +474,7 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(editExistingDocument
-                ? "You have 10 seconds to focus the document editor. The app will select all and copy its text to verify an exact match with Current Document before editing. This replaces your clipboard. Disable autocorrect first."
+                ? "You have 10 seconds to switch to Google Docs or your destination app, then click inside the document text (not the browser toolbar). The app will copy and verify the entire document before editing; your clipboard is replaced. Disable autocorrect first."
                 : "You'll have 10 seconds to switch to your target window.\n\n⚠️ Make sure auto-correct is turned off in the destination document before continuing.")
         }
         .alert("Editing Error", isPresented: $showEditingError) {
