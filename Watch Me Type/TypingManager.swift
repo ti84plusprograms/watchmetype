@@ -356,12 +356,28 @@ final class TypingManager: NSObject, ObservableObject {
             return
         }
         let sourceText = String(textToType)
-        targetAppPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        targetWindowTitle = getFocusedWindowTitle()
-
-        guard targetAppPID != nil, targetWindowTitle != nil else {
-            abortEditingWithError(.unexpectedState("Could not identify the target window."))
+        guard let targetApp = NSWorkspace.shared.frontmostApplication else {
+            abortEditingWithError(.unexpectedState(
+                "Could not identify the frontmost app. Activate the document editor during the countdown."
+            ))
             return
+        }
+
+        // Never select all in our own editor if the user did not switch apps.
+        guard targetApp.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            abortEditingWithError(.unexpectedState(
+                "Watch Me Type is still the active app. During the countdown, switch to the destination document and click inside its editable text."
+            ))
+            return
+        }
+
+        targetAppPID = targetApp.processIdentifier
+        // Some browsers do not expose an AX window title. In that case, the
+        // focus guard tracks the app PID and the following clipboard check
+        // must verify the document's *complete* text before editing starts.
+        targetWindowTitle = getFocusedWindowTitle()
+        if targetWindowTitle == nil {
+            appLog("No Accessibility window title for \(targetApp.localizedName ?? "target app"); using PID and exact document text verification", level: .warning)
         }
 
         state = .editing
