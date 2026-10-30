@@ -411,11 +411,30 @@ final class TypingManager: NSObject, ObservableObject {
 
                 // Collapse the selection without deleting it, even if verification fails.
                 self.sendArrowKey(.right)
-                guard freshCopy, actualText == sourceText else {
+
+                guard freshCopy else {
                     self.abortEditingWithError(.unexpectedState(
-                        "Copied document text does not exactly match Current Document. " +
-                        "Copy the entire document again and retry. No edits were made."
+                        "The clipboard was not updated. Click inside the document's editable text during the countdown; no edits were made."
                     ))
+                    return
+                }
+                guard let actualText else {
+                    self.abortEditingWithError(.unexpectedState(
+                        "The target app did not copy plain text. No edits were made."
+                    ))
+                    return
+                }
+
+                // Normalize only equivalent representations. Never discard
+                // blank lines, indentation, or trailing characters to force
+                // a match: that would silently shift keyboard edit positions.
+                switch DocumentSnapshotVerifier.check(expected: sourceText, copied: actualText) {
+                case .exact:
+                    break
+                case .normalized:
+                    appLog("Document verification accepted equivalent line endings or nonbreaking spaces", level: .info)
+                case .mismatch(let details):
+                    self.abortEditingWithError(.unexpectedState(details))
                     return
                 }
 
@@ -428,7 +447,7 @@ final class TypingManager: NSObject, ObservableObject {
                     }
                     self.editExistingDocumentMode = false
                     self.startEditing(
-                        draft1: sourceText,
+                        draft1: actualText,
                         draft2: targetText,
                         customDuration: self.customEditingDuration
                     )
