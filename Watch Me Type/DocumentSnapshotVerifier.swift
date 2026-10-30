@@ -29,9 +29,13 @@ enum DocumentSnapshotVerifier {
             return .normalized
         }
 
-        let firstDifference = zip(expectedCharacters, copiedCharacters)
-            .firstIndex(where: { $0.0 != $0.1 }) ??
-            min(expectedCharacters.count, copiedCharacters.count)
+        var firstDifference = min(expectedCharacters.count, copiedCharacters.count)
+        for (index, pair) in zip(expectedCharacters, copiedCharacters).enumerated() {
+            if pair.0 != pair.1 {
+                firstDifference = index
+                break
+            }
+        }
 
         let prefix = expectedCharacters.prefix(firstDifference)
         let line = prefix.filter { isLineBreak($0) }.count + 1
