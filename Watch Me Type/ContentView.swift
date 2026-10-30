@@ -1326,6 +1326,7 @@ struct ContentView: View {
     ) -> some View {
         let showProgressSection = typingManager.state == .typing
             || typingManager.state == .paused
+            || typingManager.state == .editing
 
         VStack(spacing: 10) {
             if let instruction = overlayPrimaryInstruction {
@@ -1361,6 +1362,16 @@ struct ContentView: View {
                 .font(.system(size: statusFontSize, weight: .bold, design: .rounded))
                 .foregroundColor(primaryText)
                 .accessibilityLabel("Status: \(statusText)")
+
+            if typingManager.state == .editing {
+                Text(typingManager.progressText)
+                    .font(.caption2)
+                    .foregroundColor(secondaryText)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(5)
+                    .frame(maxWidth: 280)
+                    .accessibilityLabel(typingManager.progressText)
+            }
 
             Spacer()
                 .frame(height: 16)
