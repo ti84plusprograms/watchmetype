@@ -107,6 +107,7 @@ final class TypingManager: NSObject, ObservableObject {
     
     // Focus tracking - track specific window, not just app
     private var targetWindowTitle: String?
+    private var editExistingDocumentMode: Bool = false
     private var targetAppPID: pid_t?  // Keep as backup for window title comparison
 
     // Global Esc key handling
@@ -180,8 +181,10 @@ final class TypingManager: NSObject, ObservableObject {
         wpm: Int,
         countdown: Int = 10,
         totalDurationSeconds: TimeInterval? = nil,
-        simulateMistakes: Bool = false
+        simulateMistakes: Bool = false,
+        editExistingDocument: Bool = false
     ) {
+        editExistingDocumentMode = editExistingDocument
         // Reset any existing timers/state
         countdownTimer?.invalidate()
         typingWorkItem?.cancel()
@@ -260,7 +263,11 @@ final class TypingManager: NSObject, ObservableObject {
                     self.countdownRemaining -= 1
                 } else {
                     timer.invalidate()
-                    self.beginTypingLoop()
+                    if self.editExistingDocumentMode {
+                        self.beginEditingExistingDocument()
+                    } else {
+                        self.beginTypingLoop()
+                    }
                 }
             }
         }
@@ -288,6 +295,7 @@ final class TypingManager: NSObject, ObservableObject {
         isThinking = false
         targetAppPID = nil
         targetWindowTitle = nil
+        editExistingDocumentMode = false
         stateBeforePause = nil
         lastCompletionDate = nil
         lastTypingPhaseDuration = nil
@@ -302,6 +310,109 @@ final class TypingManager: NSObject, ObservableObject {
         editPositionOffset = 0
     }
     
+
+    // MARK: - Edit an already populated document
+
+    /// Start directly in editing mode without typing the source from scratch.
+    /// The focused editor must expose its complete text through Cmd+A/Cmd+C.
+    func startEditingExistingDocument(
+        currentText: String,
+        targetText: String,
+        wpm: Int,
+        countdown: Int = 10,
+        editingDuration: TimeInterval? = nil
+    ) {
+        guard !currentText.isEmpty, !targetText.isEmpty else {
+            progressText = "Current and target document text are both required."
+            return
+        }
+        draft2Text = targetText
+        draft3Text = nil
+        customEditingDuration = editingDuration
+        customEditingDuration2 = nil
+        startTyping(
+            text: currentText,
+            wpm: wpm,
+            countdown: countdown,
+            simulateMistakes: false,
+            editExistingDocument: true
+        )
+    }
+
+    /// Verify the document we will edit before issuing any destructive events.
+    /// Cmd+C replaces the general pasteboard. An exact plain-text match is
+    /// deliberately required, rather than guessing around formatting changes.
+    private func beginEditingExistingDocument() {
+        guard let targetText = draft2Text else {
+            stopTyping()
+            return
+        }
+        let sourceText = String(textToType)
+        targetAppPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        targetWindowTitle = getFocusedWindowTitle()
+
+        guard targetAppPID != nil, targetWindowTitle != nil else {
+            abortEditingWithError(.unexpectedState("Could not identify the target window."))
+            return
+        }
+
+        state = .editing
+        progressText = "Verifying existing document text…"
+        typingStartDate = Date()
+        beginSleepPrevention()
+
+        // Require a new pasteboard change to avoid trusting stale copied text.
+        let clipboardBeforeCopy = NSPasteboard.general.changeCount
+        sendCommandShortcut(0x00) // Cmd+A selects everything in the focused editor
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self, self.state == .editing else { return }
+            guard self.isTargetWindowFocused() else {
+                self.abortEditingWithError(.focusLostDuringEdit)
+                return
+            }
+
+            self.sendCommandShortcut(0x08) // Cmd+C copies the selection
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.70) { [weak self] in
+                guard let self, self.state == .editing else { return }
+                guard self.isTargetWindowFocused() else {
+                    self.abortEditingWithError(.focusLostDuringEdit)
+                    return
+                }
+
+                let pasteboard = NSPasteboard.general
+                let actualText = pasteboard.string(forType: .string)
+                let freshCopy = pasteboard.changeCount > clipboardBeforeCopy
+
+                // Collapse the selection without deleting it, even if verification fails.
+                self.sendArrowKey(.right)
+                guard freshCopy, actualText == sourceText else {
+                    self.abortEditingWithError(.unexpectedState(
+                        "Copied document text does not exactly match Current Document. " +
+                        "Copy the entire document again and retry. No edits were made."
+                    ))
+                    return
+                }
+
+                // After Cmd+A, Right puts the caret at the document's end.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                    guard let self, self.state == .editing else { return }
+                    guard self.isTargetWindowFocused() else {
+                        self.abortEditingWithError(.focusLostDuringEdit)
+                        return
+                    }
+                    self.editExistingDocumentMode = false
+                    self.startEditing(
+                        draft1: sourceText,
+                        draft2: targetText,
+                        customDuration: self.customEditingDuration
+                    )
+                }
+            }
+        }
+    }
+
     // MARK: - Private typing logic
     
     private func beginTypingLoop() {
@@ -990,6 +1101,19 @@ final class TypingManager: NSObject, ObservableObject {
               let keyUp = CGEvent(keyboardEventSource: source, virtualKey: escapeKeyCode, keyDown: false) else {
             return
         }
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
+    }
+
+    /// Issue one Command-key shortcut in the currently focused editor.
+    private func sendCommandShortcut(_ keyCode: CGKeyCode) {
+        let source = CGEventSource(stateID: .hidSystemState)
+        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+            return
+        }
+        keyDown.flags = .maskCommand
+        keyUp.flags = []
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
     }
