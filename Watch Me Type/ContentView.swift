@@ -474,7 +474,7 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(editExistingDocument
-                ? "You have 10 seconds to switch to Google Docs or your destination app, then click inside the document text (not the browser toolbar). The app will copy and verify the entire document before editing; your clipboard is replaced. Disable autocorrect first."
+                ? "You have 10 seconds to open your existing document and click inside its editable text. This mode SKIPS document-text verification, moves the cursor to the end (Cmd+Down), then edits directly. Work on a duplicate first. Turn off autocorrect."
                 : "You'll have 10 seconds to switch to your target window.\n\n⚠️ Make sure auto-correct is turned off in the destination document before continuing.")
         }
         .alert("Editing Error", isPresented: $showEditingError) {
@@ -784,7 +784,7 @@ struct ContentView: View {
             Toggle("Edit Existing Document", isOn: $editExistingDocument)
                 .font(.headline)
             if editExistingDocument {
-                Text("Paste the current and target versions above. Make a backup first. The app verifies the focused document by copying its text before making changes.")
+                Text("Paste the exact existing text and the target version above. Back up the document first. This mode skips clipboard checks and edits directly; the starting text and cursor position must be correct.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
