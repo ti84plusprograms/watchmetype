@@ -1585,9 +1585,15 @@ final class TypingManager: NSObject, ObservableObject {
 
             appLog("Deleting \(count) characters with backspace (from end)", level: .debug)
             let backspaceDelay = 0.1 * editingDelayMultiplier
-            sendKeysWithDelay(count: count, delay: backspaceDelay) {
+            progressText = "Deleting 0/\(count) characters in edit \(currentEditIndex + 1)/\(positionedEdits.count)…"
+            sendKeysWithDelay(count: count, delay: backspaceDelay, keyAction: {
                 self.sendBackspace()
-            } completion: { [weak self] in
+            }, progress: { [weak self] completed in
+                guard let self else { return }
+                if completed % 10 == 0 || completed == count {
+                    self.progressText = "Deleting \(completed)/\(count) characters in edit \(self.currentEditIndex + 1)/\(self.positionedEdits.count)…"
+                }
+            }, completion: { [weak self] in
                 guard let self = self, self.state == .editing else { return }
                 self.actualCursorPosition = adjustedPosition
                 if self.editDirection == .leftToRight {
@@ -1607,6 +1613,7 @@ final class TypingManager: NSObject, ObservableObject {
             appLog("Inserting '\(text.prefix(20))\(text.count > 20 ? "..." : "")'", level: .debug)
             let baseDelay = max(0.05, interCharacterDelay)
             let delay = baseDelay * editingDelayMultiplier
+            progressText = "Inserting 0/\(text.count) characters in edit \(currentEditIndex + 1)/\(positionedEdits.count)…"
             sendCharactersWithDelay(text, delay: delay) { [weak self] in
                 guard let self = self, self.state == .editing else { return }
                 self.actualCursorPosition = adjustedPosition + text.count
@@ -1629,6 +1636,7 @@ final class TypingManager: NSObject, ObservableObject {
             }
             appLog("Replacing \(oldCount) chars with '\(newText.prefix(30))\(newText.count > 30 ? "..." : "")'", level: .debug)
 
+            progressText = "Replacing \(oldCount) characters with \(newText.count) characters in edit \(currentEditIndex + 1)/\(positionedEdits.count)…"
             executeReplace(oldCount: oldCount, newText: newText) { [weak self] in
                 guard let self = self, self.state == .editing else { return }
                 self.actualCursorPosition = adjustedPosition + newText.count
@@ -1667,6 +1675,7 @@ final class TypingManager: NSObject, ObservableObject {
                 return
             }
 
+            self.progressText = "Replacement insertion 0/\(newText.count) in edit \(self.currentEditIndex + 1)/\(self.positionedEdits.count)…"
             self.sendCharactersWithDelay(newText, delay: baseDelay) { [weak self] in
                 guard let self = self, self.state == .editing else { return }
 
@@ -1679,9 +1688,15 @@ final class TypingManager: NSObject, ObservableObject {
 
         // Delete first using backspace (we're at the END of the text), then insert.
         if oldCount > 0 {
-            self.sendKeysWithDelay(count: oldCount, delay: backspaceDelay) {
+            progressText = "Replacement deletion 0/\(oldCount) in edit \(currentEditIndex + 1)/\(positionedEdits.count)…"
+            self.sendKeysWithDelay(count: oldCount, delay: backspaceDelay, keyAction: {
                 self.sendBackspace()
-            } completion: { [weak self] in
+            }, progress: { [weak self] completed in
+                guard let self else { return }
+                if completed % 10 == 0 || completed == oldCount {
+                    self.progressText = "Replacement deletion \(completed)/\(oldCount) in edit \(self.currentEditIndex + 1)/\(self.positionedEdits.count)…"
+                }
+            }, completion: { [weak self] in
                 guard let self = self, self.state == .editing else { return }
 
                 DispatchQueue.main.asyncAfter(deadline: .now() + postDeleteDelay) { [weak self] in
@@ -1844,6 +1859,9 @@ final class TypingManager: NSObject, ObservableObject {
 
         // Send the character (same as typing phase)
         sendCharacter(character)
+        if editExistingDocumentMode && (editCharIndex % 10 == 0 || editCharIndex == editCharsToType.count) {
+            progressText = "Inserting \(editCharIndex)/\(editCharsToType.count) characters in edit \(currentEditIndex + 1)/\(positionedEdits.count)…"
+        }
 
         // Temporarily set previousCharacter to editCharPreviousChar so extraDelay() uses the correct context
         let savedPreviousChar = previousCharacter
