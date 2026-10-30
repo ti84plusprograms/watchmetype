@@ -414,7 +414,9 @@ final class TypingManager: NSObject, ObservableObject {
 
                 guard freshCopy else {
                     self.abortEditingWithError(.unexpectedState(
-                        "The clipboard was not updated. Click inside the document's editable text during the countdown; no edits were made."
+                        "The clipboard did not change after the app tried Cmd+A/Cmd+C. " +
+                        "Make sure the document editor has keyboard focus during the countdown. " +
+                        "If manual Cmd+A then Cmd+C works in the document, the automated shortcut may not be reaching it. No edits were made."
                     ))
                     return
                 }
@@ -1149,6 +1151,9 @@ final class TypingManager: NSObject, ObservableObject {
     }
 
     /// Issue one Command-key shortcut in the currently focused editor.
+    /// Maintain the modifier on the key-up event so the receiving app sees
+    /// one consistent keyboard shortcut, rather than a modified key-down and
+    /// an unmodified key-up.
     private func sendCommandShortcut(_ keyCode: CGKeyCode) {
         let source = CGEventSource(stateID: .hidSystemState)
         guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
@@ -1156,7 +1161,7 @@ final class TypingManager: NSObject, ObservableObject {
             return
         }
         keyDown.flags = .maskCommand
-        keyUp.flags = []
+        keyUp.flags = .maskCommand
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
     }
