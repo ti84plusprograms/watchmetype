@@ -795,12 +795,18 @@ struct ContentView: View {
                 // Extra horizontal space so glow shadow isn't clipped by parent
                 .padding(.horizontal, 4)
 
-            cleanUpCard
-                .disabled(codeMode)
-                .opacity(codeMode ? 0.55 : 1.0)
-            typingSpeedCard
-
-            Spacer(minLength: 0)
+            // Preserve the original card appearance while keeping the Start
+            // button visible if the additional settings exceed window height.
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 12) {
+                    cleanUpCard
+                        .disabled(codeMode)
+                        .opacity(codeMode ? 0.55 : 1.0)
+                    typingSpeedCard
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .scrollIndicators(.hidden)
 
             VStack(spacing: 6) {
                 if !hasFirstDraft {
