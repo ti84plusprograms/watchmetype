@@ -432,6 +432,39 @@ final class EditOperationConverterTests: XCTestCase {
         XCTAssertTrue(ltrEdits.isEmpty, "Identical drafts should produce no edits")
     }
 
+    // MARK: - Mode-Specific Typing Speed UX Tests
+
+    func testNormalModeKeepsOriginalWPMRange() {
+        XCTAssertEqual(TypingSpeedPolicy.range(forCodeMode: false), 40.0...120.0)
+    }
+
+    func testCodeModeUsesExpandedWPMRange() {
+        XCTAssertEqual(TypingSpeedPolicy.range(forCodeMode: true), 40.0...400.0)
+    }
+
+    func testSwitchingToCodeModePreservesNumericSpeed() {
+        XCTAssertEqual(TypingSpeedPolicy.adjusted(120, forCodeMode: true), 120)
+        XCTAssertEqual(TypingSpeedPolicy.adjusted(80, forCodeMode: true), 80)
+        // The same numeric speed sits closer to the left on the wider scale.
+        let prose = TypingSpeedPolicy.range(forCodeMode: false)
+        let code = TypingSpeedPolicy.range(forCodeMode: true)
+        let prosePosition = (120.0 - prose.lowerBound) / (prose.upperBound - prose.lowerBound)
+        let codePosition = (120.0 - code.lowerBound) / (code.upperBound - code.lowerBound)
+        XCTAssertEqual(prosePosition, 1.0)
+        XCTAssertLessThan(codePosition, prosePosition)
+    }
+
+    func testSwitchingBackToNormalClampsHighCodeSpeed() {
+        XCTAssertEqual(TypingSpeedPolicy.adjusted(350, forCodeMode: false), 120)
+        XCTAssertEqual(TypingSpeedPolicy.adjusted(400, forCodeMode: false), 120)
+        XCTAssertEqual(TypingSpeedPolicy.adjusted(100, forCodeMode: false), 100)
+    }
+
+    func testSwitchingBackToCodeDoesNotRestoreStaleHighSpeed() {
+        let normal = TypingSpeedPolicy.adjusted(350, forCodeMode: false)
+        XCTAssertEqual(TypingSpeedPolicy.adjusted(normal, forCodeMode: true), 120)
+    }
+
     // MARK: - Code Formatting Regression Tests
 
     func testCodeTokensRoundTripExactWhitespace() {
