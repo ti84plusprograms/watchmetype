@@ -243,11 +243,23 @@ enum DurationUnit: String, CaseIterable, Identifiable {
 }
 
 
-/// Small value type so switching modes restores the user's settings for each mode.
+/// Only pause and mistake preferences are mode-specific. Speed stays numeric
+/// when the mode changes; it is capped only when entering the smaller range.
 private struct TypingPreferences {
-    var wpm: Double
     var thinking: Bool
     var mistakes: Bool
+}
+
+/// Shared speed policy for the slider and its regression tests.
+enum TypingSpeedPolicy {
+    static func range(forCodeMode enabled: Bool) -> ClosedRange<Double> {
+        enabled ? 40.0...400.0 : 40.0...120.0
+    }
+
+    static func adjusted(_ currentWPM: Double, forCodeMode enabled: Bool) -> Double {
+        let allowed = range(forCodeMode: enabled)
+        return min(max(currentWPM, allowed.lowerBound), allowed.upperBound)
+    }
 }
 
 struct ContentView: View {
@@ -256,25 +268,24 @@ struct ContentView: View {
     @State private var codeMode: Bool = false
     @State private var includeThinkingPauses: Bool = true
     @State private var simulateMistakes: Bool = true
-    @State private var prosePreferences = TypingPreferences(wpm: 80, thinking: true, mistakes: true)
-    @State private var codePreferences = TypingPreferences(wpm: 240, thinking: false, mistakes: false)
+    @State private var prosePreferences = TypingPreferences(thinking: true, mistakes: true)
+    @State private var codePreferences = TypingPreferences(thinking: false, mistakes: false)
 
-    // Preserve the upstream 40–120 WPM range in prose; expand only Code Mode.
+    // Keep the upstream prose range and use a wider scale only for code.
     private var typingSpeedRange: ClosedRange<Double> {
-        codeMode ? 40...400 : 40...120
+        TypingSpeedPolicy.range(forCodeMode: codeMode)
     }
 
-    // Save the outgoing mode before changing the slider's valid range.
-    // A binding setter avoids SwiftUI clamping an old 400 WPM value into
-    // the prose range before the old Code Mode value can be remembered.
     private var codeModeBinding: Binding<Bool> {
         Binding(
             get: { codeMode },
             set: { enabled in
                 guard enabled != codeMode else { return }
 
+                // Thinking and mistakes remain mode-specific. WPM does not:
+                // 120 prose -> 120 code (a different relative slider position).
+                // 350 code -> 120 prose (the maximum allowed prose speed).
                 let current = TypingPreferences(
-                    wpm: targetWPM,
                     thinking: includeThinkingPauses,
                     mistakes: simulateMistakes
                 )
@@ -285,7 +296,7 @@ struct ContentView: View {
                 }
 
                 let selected = enabled ? codePreferences : prosePreferences
-                targetWPM = min(max(selected.wpm, 40), enabled ? 400 : 120)
+                targetWPM = TypingSpeedPolicy.adjusted(targetWPM, forCodeMode: enabled)
                 includeThinkingPauses = selected.thinking
                 simulateMistakes = selected.mistakes
                 codeMode = enabled
