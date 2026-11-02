@@ -432,6 +432,27 @@ final class EditOperationConverterTests: XCTestCase {
         XCTAssertTrue(ltrEdits.isEmpty, "Identical drafts should produce no edits")
     }
 
+    // MARK: - Code Formatting Regression Tests
+
+    func testCodeTokensRoundTripExactWhitespace() {
+        let code = "def greet(name):\n    if name:\n        print(name)\n\n\treturn True\n"
+        XCTAssertEqual(tokenizeIntoWords(code).joined(), code)
+    }
+
+    func testCodeRevisionPreservesIndentationAndTrailingNewlines() {
+        let first = "def value(x):\n    return x + 1\n\n"
+        let second = "def value(x):\n    return x + 2\n\n"
+        let edits = convertDraftsToPositionedEdits(draft1: first, draft2: second)
+        XCTAssertEqual(applyEdits(to: first, edits: edits), second)
+    }
+
+    func testCodeRevisionWithTabsAndBlankLines() {
+        let first = "value = 1\n\n\tprint(value)\n"
+        let second = "value = 1\n\n\tprint(value + 1)\n"
+        let edits = convertDraftsToPositionedEdits(draft1: first, draft2: second)
+        XCTAssertEqual(applyEdits(to: first, edits: edits), second)
+    }
+
     // MARK: - Helper Functions
 
     /// Applies edits to text to verify correctness

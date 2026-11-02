@@ -243,9 +243,21 @@ enum DurationUnit: String, CaseIterable, Identifiable {
 }
 
 
+/// Small value type so switching modes restores the user's settings for each mode.
+private struct TypingPreferences {
+    var wpm: Double
+    var thinking: Bool
+    var mistakes: Bool
+}
+
 struct ContentView: View {
     @State private var inputText: String = ""
     @State private var targetWPM: Double = 80
+    @State private var codeMode: Bool = false
+    @State private var includeThinkingPauses: Bool = true
+    @State private var simulateMistakes: Bool = true
+    @State private var prosePreferences = TypingPreferences(wpm: 80, thinking: true, mistakes: true)
+    @State private var codePreferences = TypingPreferences(wpm: 240, thinking: false, mistakes: false)
     @State private var removeBlankLines: Bool = false
     @State private var removeEmojis: Bool = false
     @State private var removeHorizontalRules: Bool = false
@@ -346,7 +358,9 @@ struct ContentView: View {
         return typingManager.estimateEditingTime(
             draft1: inputText,
             draft2: inputTextDraft2,
-            wpm: Int(targetWPM)
+            wpm: Int(targetWPM),
+            includeThinkingPauses: includeThinkingPauses,
+            codeMode: codeMode
         )
     }
 
@@ -381,6 +395,23 @@ struct ContentView: View {
         }
         .onChange(of: targetWPM) { _, _ in
             flashEstimate()
+        }
+        .onChange(of: codeMode) { _, enabled in
+            // Keep independent settings; don't erase custom speeds when switching.
+            let current = TypingPreferences(
+                wpm: targetWPM,
+                thinking: includeThinkingPauses,
+                mistakes: simulateMistakes
+            )
+            if enabled {
+                prosePreferences = current
+            } else {
+                codePreferences = current
+            }
+            let selected = enabled ? codePreferences : prosePreferences
+            targetWPM = selected.wpm
+            includeThinkingPauses = selected.thinking
+            simulateMistakes = selected.mistakes
         }
         .onChange(of: showDraft2) { _, _ in
             adjustWindowForDraftCountChange()
@@ -444,7 +475,9 @@ struct ContentView: View {
                         typingDuration: desiredDurationSeconds,
                         editingDuration: editingDurationSeconds,
                         editingDuration2: editingDuration2Seconds,
-                        simulateMistakes: true
+                        simulateMistakes: simulateMistakes,
+                        includeThinkingPauses: includeThinkingPauses,
+                        codeMode: codeMode
                     )
                 } else {
                     typingManager.startTyping(
@@ -452,7 +485,9 @@ struct ContentView: View {
                         wpm: Int(targetWPM),
                         countdown: 10,
                         totalDurationSeconds: desiredDurationSeconds,
-                        simulateMistakes: true
+                        simulateMistakes: simulateMistakes,
+                        includeThinkingPauses: includeThinkingPauses,
+                        codeMode: codeMode
                     )
                 }
             }
@@ -760,10 +795,18 @@ struct ContentView: View {
                 // Extra horizontal space so glow shadow isn't clipped by parent
                 .padding(.horizontal, 4)
 
-            cleanUpCard
-            typingSpeedCard
-
-            Spacer(minLength: 0)
+            // Preserve the original card appearance while keeping the Start
+            // button visible if the additional settings exceed window height.
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 12) {
+                    cleanUpCard
+                        .disabled(codeMode)
+                        .opacity(codeMode ? 0.55 : 1.0)
+                    typingSpeedCard
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .scrollIndicators(.hidden)
 
             VStack(spacing: 6) {
                 if !hasFirstDraft {
@@ -868,7 +911,7 @@ struct ContentView: View {
                     Text("Target Speed: \(Int(targetWPM)) WPM")
                         .font(.subheadline)
 
-                    Slider(value: $targetWPM, in: 40...120, step: 10)
+                    Slider(value: $targetWPM, in: 40...400, step: 10)
 
                     HStack {
                         Image(systemName: "tortoise")
@@ -878,7 +921,7 @@ struct ContentView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Spacer()
-                        Text("avg. human")
+                        Text("Balanced")
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Spacer()
@@ -894,10 +937,28 @@ struct ContentView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Spacer()
-                        Text("120")
+                        Text("400")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
+                }
+
+                Toggle("Code Mode", isOn: $codeMode)
+                    .font(.subheadline)
+                    .help("Preserve source whitespace exactly; disable Clean-Up. Turn off auto-indentation and formatting in the target editor.")
+
+                Toggle("Thinking Pauses", isOn: $includeThinkingPauses)
+                    .font(.subheadline)
+                    .help("Add human-like delays after words, punctuation, and blank lines.")
+
+                Toggle("Simulate Mistakes", isOn: $simulateMistakes)
+                    .font(.subheadline)
+                    .help("Occasionally type an incorrect letter and correct it.")
+
+                if codeMode {
+                    Text("Preserves spaces, tabs and line breaks. Turn off auto-indent, auto-format and bracket completion in the target editor.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
 
                 Toggle("Custom Typing Duration", isOn: $useTotalTime)
@@ -1434,14 +1495,20 @@ struct ContentView: View {
     }
 
     private var estimatedTimeText: Text {
-        guard let minutes = estimatedMinutes else {
+        guard let seconds = estimatedTypingSeconds else {
             return Text("")
         }
 
         let prefix = Text("Estimated: at least ")
             .foregroundColor(.secondary)
 
-        let number = Text("\(minutes)m")
+        let duration: String
+        if codeMode || !includeThinkingPauses, seconds < 60 {
+            duration = "\(max(1, Int(ceil(seconds))))s"
+        } else {
+            duration = "\(max(1, Int(round(seconds / 60))))m"
+        }
+        let number = Text(duration)
             .bold()
             .foregroundColor(highlightEstimate ? .accentColor : .primary)
 
@@ -1453,7 +1520,9 @@ struct ContentView: View {
             return Text("")
         }
 
-        let estimate = formatDurationInFiveMinuteIncrements(editTime)
+        let estimate = (codeMode || !includeThinkingPauses)
+            ? formatDuration(editTime)
+            : formatDurationInFiveMinuteIncrements(editTime)
 
         let prefix = Text("Estimated: at least ")
             .foregroundColor(.secondary)
@@ -1465,29 +1534,13 @@ struct ContentView: View {
         return prefix + value
     }
 
-    private var estimatedMinutes: Int? {
-        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let characterCount = trimmed.count
-
-        guard characterCount > 0 else {
-            return nil
-        }
-
-        // Match TypingManager: derive base typing time from WPM and character count,
-        // then add an equal amount of jitter (thinking pauses, commas, mistakes, etc.).
-        let wpm = max(1.0, targetWPM)
-        let charsPerMinute = max(5.0, wpm * 5.0)
-        let interCharacterDelay = 60.0 / charsPerMinute
-
-        let baseTypingTimeSeconds = Double(characterCount) * interCharacterDelay
-
-        let jitterMultiplier = 1.0
-        let estimatedJitterSeconds = baseTypingTimeSeconds * jitterMultiplier
-        let totalSeconds = baseTypingTimeSeconds + estimatedJitterSeconds
-
-        let minutes = totalSeconds / 60.0
-        let roundedMinutes = max(1, Int(round(minutes)))
-        return roundedMinutes
+    private var estimatedTypingSeconds: TimeInterval? {
+        let characterCount = inputText.count
+        guard characterCount > 0 else { return nil }
+        let charactersPerMinute = max(5.0, targetWPM * 5.0)
+        let baseSeconds = Double(characterCount) * 60.0 / charactersPerMinute
+        // Prose keeps the existing rough jitter estimate; fast mode omits it.
+        return baseSeconds * (includeThinkingPauses ? 2.0 : 1.0)
     }
 
     private var desiredDurationSummary: String? {
@@ -1576,10 +1629,11 @@ struct ContentView: View {
     }
 
     private var estimatedDurationDescription: String {
-        guard let minutes = estimatedMinutes else {
-            return "—"
+        guard let seconds = estimatedTypingSeconds else { return "—" }
+        if codeMode || !includeThinkingPauses, seconds < 60 {
+            return "\(max(1, Int(ceil(seconds)))) second(s)"
         }
-        return "\(minutes) minute(s)"
+        return "\(max(1, Int(round(seconds / 60)))) minute(s)"
     }
 
     private var desiredDurationSeconds: TimeInterval? {
@@ -1631,6 +1685,8 @@ struct ContentView: View {
     }
 
     private func processInputText() {
+        // Formatting cleanup is destructive to code (indentation and blank lines).
+        guard !codeMode else { return }
         inputText = processText(inputText)
         if !inputTextDraft2.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             inputTextDraft2 = processText(inputTextDraft2)

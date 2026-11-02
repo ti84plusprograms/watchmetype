@@ -79,7 +79,14 @@ final class TypingManager: NSObject, ObservableObject {
     private var textToType: [Character] = []
     private var currentIndex: Int = 0
     private var interCharacterDelay: TimeInterval = 0.05
-    
+    private var includeThinkingPauses: Bool = true
+    private var isCodeMode: Bool = false
+
+    // Keep the original prose insertion speed; allow faster code inserts.
+    private var editCharacterDelay: TimeInterval {
+        max(isCodeMode ? 0.03 : 0.05, interCharacterDelay)
+    }
+
     // Jitter / thinking state
     private var previousCharacter: Character?
     private var wordsSinceLastThinkingPause: Int = 0
@@ -180,7 +187,9 @@ final class TypingManager: NSObject, ObservableObject {
         wpm: Int,
         countdown: Int = 10,
         totalDurationSeconds: TimeInterval? = nil,
-        simulateMistakes: Bool = false
+        simulateMistakes: Bool = false,
+        includeThinkingPauses: Bool = true,
+        codeMode: Bool = false
     ) {
         // Reset any existing timers/state
         countdownTimer?.invalidate()
@@ -192,6 +201,8 @@ final class TypingManager: NSObject, ObservableObject {
         wordsSinceLastThinkingPause = 0
         wordsUntilNextThinkingPause = Int.random(in: 3...5)
         shouldSimulateMistakes = simulateMistakes
+        self.includeThinkingPauses = includeThinkingPauses
+        isCodeMode = codeMode
         charactersTypedSinceLastMistake = 0
         nextMistakeInCharacters = Int.random(in: 50...75)
         extraDelayPerSentenceEnd = 0
@@ -220,7 +231,7 @@ final class TypingManager: NSObject, ObservableObject {
             // Rough estimate of extra time introduced by human-like jitter
             // (thinking pauses, commas, mistakes, etc.). This helps keep
             // the requested duration closer to reality.
-            let jitterMultiplier = 1.0
+            let jitterMultiplier = includeThinkingPauses ? 1.0 : 0.0
             let estimatedJitter = baseTypingTime * jitterMultiplier
             let baseWithJitter = baseTypingTime + estimatedJitter
 
@@ -688,6 +699,22 @@ final class TypingManager: NSObject, ObservableObject {
     // MARK: - Jitter / thinking behaviour
     
     private func extraDelay(afterTyping character: Character) -> TimeInterval {
+        // No random word, punctuation or paragraph pauses when thinking is off.
+        // An explicit custom minimum duration may still add deliberate delays.
+        if !includeThinkingPauses {
+            var requestedExtra: TimeInterval = 0
+            if ".?!;:".contains(character) {
+                requestedExtra += extraDelayPerSentenceEnd
+            }
+            if character == "\n", previousCharacter == "\n" {
+                requestedExtra += extraDelayPerParagraphBreak
+            }
+            DispatchQueue.main.async {
+                self.isThinking = requestedExtra >= 0.8
+            }
+            return requestedExtra
+        }
+
         var extra: TimeInterval = 0
         
         if character.isWhitespace {
@@ -1032,7 +1059,13 @@ final class TypingManager: NSObject, ObservableObject {
 
     /// Estimates the editing time for transforming draft1 into draft2 at the given WPM
     /// This can be called before starting to provide a preview estimate
-    func estimateEditingTime(draft1: String, draft2: String, wpm: Int) -> TimeInterval {
+    func estimateEditingTime(
+        draft1: String,
+        draft2: String,
+        wpm: Int,
+        includeThinkingPauses: Bool = true,
+        codeMode: Bool = false
+    ) -> TimeInterval {
         // If drafts are identical, no editing needed
         if draft1 == draft2 {
             return 0
@@ -1055,7 +1088,7 @@ final class TypingManager: NSObject, ObservableObject {
         let deleteDelay = 0.1 * delayMultiplier
         let postDeleteDelay = 0.3 * delayMultiplier
         let postInsertDelay = 0.3 * delayMultiplier
-        let baseCharDelay = max(0.05, baseInterCharDelay) * delayMultiplier
+        let baseCharDelay = max(codeMode ? 0.03 : 0.05, baseInterCharDelay) * delayMultiplier
 
         var totalTime: TimeInterval = 0
         var simulatedCursorPos = draft1.count // Start at end of draft1
@@ -1080,7 +1113,9 @@ final class TypingManager: NSObject, ObservableObject {
                 let charCount = text.count
                 totalTime += Double(charCount) * baseCharDelay
                 // Add estimated jitter based on actual text content
-                totalTime += estimateTextJitter(text) * delayMultiplier
+                if includeThinkingPauses {
+                    totalTime += estimateTextJitter(text) * delayMultiplier
+                }
                 totalTime += postInsertDelay
                 simulatedCursorPos = edit.position + text.count
 
@@ -1091,7 +1126,9 @@ final class TypingManager: NSObject, ObservableObject {
                 let charCount = newText.count
                 totalTime += Double(charCount) * baseCharDelay
                 // Add estimated jitter based on actual text content
-                totalTime += estimateTextJitter(newText) * delayMultiplier
+                if includeThinkingPauses {
+                    totalTime += estimateTextJitter(newText) * delayMultiplier
+                }
                 totalTime += postInsertDelay
                 simulatedCursorPos = edit.position + newText.count
 
@@ -1117,7 +1154,9 @@ final class TypingManager: NSObject, ObservableObject {
         typingDuration: TimeInterval? = nil,
         editingDuration: TimeInterval? = nil,
         editingDuration2: TimeInterval? = nil,
-        simulateMistakes: Bool = false
+        simulateMistakes: Bool = false,
+        includeThinkingPauses: Bool = true,
+        codeMode: Bool = false
     ) {
         self.draft2Text = draft2
         self.customEditingDuration = editingDuration
@@ -1129,7 +1168,9 @@ final class TypingManager: NSObject, ObservableObject {
             wpm: wpm,
             countdown: countdown,
             totalDurationSeconds: typingDuration,
-            simulateMistakes: simulateMistakes
+            simulateMistakes: simulateMistakes,
+            includeThinkingPauses: includeThinkingPauses,
+            codeMode: codeMode
         )
     }
 
@@ -1187,7 +1228,7 @@ final class TypingManager: NSObject, ObservableObject {
     /// Estimates the jitter time for typing a given text string
     /// This mirrors the extraDelay(afterTyping:) logic to provide accurate estimates
     private func estimateTextJitter(_ text: String) -> TimeInterval {
-        guard !text.isEmpty else { return 0 }
+        guard includeThinkingPauses, !text.isEmpty else { return 0 }
 
         var totalJitter: TimeInterval = 0
         let chars = Array(text)
@@ -1237,7 +1278,7 @@ final class TypingManager: NSObject, ObservableObject {
         let deleteDelay = 0.1 * editingDelayMultiplier
         let postDeleteDelay = 0.3 * editingDelayMultiplier
         let postInsertDelay = 0.3 * editingDelayMultiplier
-        let baseCharDelay = max(0.05, interCharacterDelay) * editingDelayMultiplier
+        let baseCharDelay = editCharacterDelay * editingDelayMultiplier
 
         var simulatedCursorPos = textToType.count // Start cursor at end of typed text (draft1)
 
@@ -1461,7 +1502,7 @@ final class TypingManager: NSObject, ObservableObject {
 
         case .insert(let text):
             appLog("Inserting '\(text.prefix(20))\(text.count > 20 ? "..." : "")'", level: .debug)
-            let baseDelay = max(0.05, interCharacterDelay)
+            let baseDelay = editCharacterDelay
             let delay = baseDelay * editingDelayMultiplier
             sendCharactersWithDelay(text, delay: delay) { [weak self] in
                 guard let self = self, self.state == .editing else { return }
@@ -1512,7 +1553,7 @@ final class TypingManager: NSObject, ObservableObject {
         let backspaceDelay = 0.1 * editingDelayMultiplier
         let postDeleteDelay = 0.2 * editingDelayMultiplier
         let postInsertDelay = 0.3 * editingDelayMultiplier
-        let baseDelay = max(0.05, interCharacterDelay) * editingDelayMultiplier
+        let baseDelay = editCharacterDelay * editingDelayMultiplier
 
         // Insert the new text AFTER deleting the old text.
         let performInsert: () -> Void = { [weak self] in
@@ -1700,7 +1741,7 @@ final class TypingManager: NSObject, ObservableObject {
         previousCharacter = editCharPreviousChar
 
         // Calculate delay using the same extraDelay logic as typing phase
-        let baseDelay = max(0.05, interCharacterDelay)
+        let baseDelay = editCharacterDelay
         let extra = extraDelay(afterTyping: character)
         let nextDelay = (baseDelay + extra) * editingDelayMultiplier
 
