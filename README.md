@@ -132,6 +132,18 @@ nested indentation, multiple blank lines, tabs, punctuation, and a trailing
 newline at 80 and 240 WPM. Then verify Draft 1 → 2 with a small replacement.
 Compare the final text literally, not just visually.
 
+**If the countdown runs but no text appears:** first try a disposable
+plain-text TextEdit document, with the caret visibly inside the text area
+before countdown reaches zero. An Xcode-run build may need Accessibility
+permission separately from the installed DMG. Check **System Settings >
+Privacy & Security > Accessibility** for the build you are actually running;
+quit and reopen it after granting permission if needed. The app now rechecks
+permission on Start and again when the countdown ends, and displays an
+actionable error if no external target application is frontmost. If TextEdit
+works but a browser editor does not, investigate the browser's text focus and
+autocorrection behavior. The source cannot verify delivery into every
+third-party editor.
+
 The feature's original two- and three-draft revision algorithms remain
 unchanged. The experimental *edit already existing Google Doc* branch is
 not included.
