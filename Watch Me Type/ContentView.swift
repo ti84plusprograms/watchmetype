@@ -1503,7 +1503,7 @@ struct ContentView: View {
             .foregroundColor(.secondary)
 
         let duration: String
-        if seconds < 60 {
+        if codeMode || !includeThinkingPauses, seconds < 60 {
             duration = "\(max(1, Int(ceil(seconds))))s"
         } else {
             duration = "\(max(1, Int(round(seconds / 60))))m"
@@ -1630,7 +1630,7 @@ struct ContentView: View {
 
     private var estimatedDurationDescription: String {
         guard let seconds = estimatedTypingSeconds else { return "—" }
-        if seconds < 60 {
+        if codeMode || !includeThinkingPauses, seconds < 60 {
             return "\(max(1, Int(ceil(seconds)))) second(s)"
         }
         return "\(max(1, Int(round(seconds / 60)))) minute(s)"
