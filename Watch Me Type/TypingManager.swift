@@ -351,7 +351,7 @@ final class TypingManager: NSObject, ObservableObject {
         targetAppPID = frontmostApp.processIdentifier
         targetWindowTitle = getFocusedWindowTitle()
 
-        appLog("Target app recorded - PID: \(targetAppPID ?? 0), name: '\(frontmostApp?.localizedName ?? "unknown")', window: '\(targetWindowTitle ?? "unknown")'", level: .debug)
+        appLog("Target app recorded - PID: \(targetAppPID ?? 0), name: '\(frontmostApp.localizedName ?? "unknown")', window: '\(targetWindowTitle ?? "unknown")'", level: .debug)
 
         state = .typing
         progressText = "Typing in progress…"
