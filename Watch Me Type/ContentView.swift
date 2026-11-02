@@ -258,6 +258,41 @@ struct ContentView: View {
     @State private var simulateMistakes: Bool = true
     @State private var prosePreferences = TypingPreferences(wpm: 80, thinking: true, mistakes: true)
     @State private var codePreferences = TypingPreferences(wpm: 240, thinking: false, mistakes: false)
+
+    // Preserve the upstream 40–120 WPM range in prose; expand only Code Mode.
+    private var typingSpeedRange: ClosedRange<Double> {
+        codeMode ? 40...400 : 40...120
+    }
+
+    // Save the outgoing mode before changing the slider's valid range.
+    // A binding setter avoids SwiftUI clamping an old 400 WPM value into
+    // the prose range before the old Code Mode value can be remembered.
+    private var codeModeBinding: Binding<Bool> {
+        Binding(
+            get: { codeMode },
+            set: { enabled in
+                guard enabled != codeMode else { return }
+
+                let current = TypingPreferences(
+                    wpm: targetWPM,
+                    thinking: includeThinkingPauses,
+                    mistakes: simulateMistakes
+                )
+                if codeMode {
+                    codePreferences = current
+                } else {
+                    prosePreferences = current
+                }
+
+                let selected = enabled ? codePreferences : prosePreferences
+                targetWPM = min(max(selected.wpm, 40), enabled ? 400 : 120)
+                includeThinkingPauses = selected.thinking
+                simulateMistakes = selected.mistakes
+                codeMode = enabled
+            }
+        )
+    }
+
     @State private var removeBlankLines: Bool = false
     @State private var removeEmojis: Bool = false
     @State private var removeHorizontalRules: Bool = false
@@ -395,23 +430,6 @@ struct ContentView: View {
         }
         .onChange(of: targetWPM) { _, _ in
             flashEstimate()
-        }
-        .onChange(of: codeMode) { _, enabled in
-            // Keep independent settings; don't erase custom speeds when switching.
-            let current = TypingPreferences(
-                wpm: targetWPM,
-                thinking: includeThinkingPauses,
-                mistakes: simulateMistakes
-            )
-            if enabled {
-                prosePreferences = current
-            } else {
-                codePreferences = current
-            }
-            let selected = enabled ? codePreferences : prosePreferences
-            targetWPM = selected.wpm
-            includeThinkingPauses = selected.thinking
-            simulateMistakes = selected.mistakes
         }
         .onChange(of: showDraft2) { _, _ in
             adjustWindowForDraftCountChange()
@@ -911,7 +929,7 @@ struct ContentView: View {
                     Text("Target Speed: \(Int(targetWPM)) WPM")
                         .font(.subheadline)
 
-                    Slider(value: $targetWPM, in: 40...400, step: 10)
+                    Slider(value: $targetWPM, in: typingSpeedRange, step: 10)
 
                     HStack {
                         Image(systemName: "tortoise")
@@ -921,7 +939,7 @@ struct ContentView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Spacer()
-                        Text("Balanced")
+                        Text(codeMode ? "Balanced" : "avg. human")
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Spacer()
@@ -937,13 +955,13 @@ struct ContentView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Spacer()
-                        Text("400")
+                        Text(codeMode ? "400" : "120")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                 }
 
-                Toggle("Code Mode", isOn: $codeMode)
+                Toggle("Code Mode", isOn: codeModeBinding)
                     .font(.subheadline)
                     .help("Preserve source whitespace exactly; disable Clean-Up. Turn off auto-indentation and formatting in the target editor.")
 
