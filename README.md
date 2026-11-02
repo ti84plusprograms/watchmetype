@@ -101,6 +101,40 @@ Tests under `Watch Me TypeTests/` cover `EditOperationConverter` (tokenisation, 
 4. In the in-app prompt, choose **Continue** and grant Accessibility access in System Settings when prompted.
 5. Sparkle will check for updates automatically after launch; manual "Check for Updates" is in the menu.
 
+## Code Mode (feature branch)
+
+The original SwiftUI layout is retained. The existing **Typing Speed** card now
+includes **Code Mode**, **Thinking Pauses**, and **Simulate Mistakes** controls,
+and supports 40–400 WPM. Prose defaults remain 80 WPM, with thinking and mistakes
+on; Code Mode starts at 240 WPM with both off. Switching modes remembers each
+mode's most recent settings.
+
+**Code Mode** sends the supplied source text without running the Clean-Up
+processor. Its Clean-Up panel is disabled to protect indentation, tabs, blank
+lines, and trailing whitespace. Normal prose cleanup remains available.
+
+**Destination-editor setup matters:** the app sends actual Return keys for
+newlines. An IDE may insert automatic indentation or matching brackets on
+its own, so disable auto-indent, automatic formatting, bracket pairing,
+completion, and autocorrect in the *destination editor* before testing exact
+code reproduction. The app does not inspect or configure those external
+settings, and reliable code behavior depends on the destination editor.
+
+**Thinking Pauses** controls random word, punctuation, and paragraph delays
+during both typing and revisions. An explicit **Custom Duration** can still
+introduce deliberate delays. **Simulate Mistakes** is independent of thinking.
+At very high WPM some editors may drop synthetic key events: start with
+160–240 WPM and check the output before increasing to 400.
+
+**Testing checklist:** on a disposable text file, verify a function with
+nested indentation, multiple blank lines, tabs, punctuation, and a trailing
+newline at 80 and 240 WPM. Then verify Draft 1 → 2 with a small replacement.
+Compare the final text literally, not just visually.
+
+The feature's original two- and three-draft revision algorithms remain
+unchanged. The experimental *edit already existing Google Doc* branch is
+not included.
+
 ## Usage notes
 
 - While the app is typing, the device is effectively unavailable; switching apps auto-pauses until you return. I would recommend running this in a VM.
