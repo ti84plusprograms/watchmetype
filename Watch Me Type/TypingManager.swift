@@ -1228,7 +1228,7 @@ final class TypingManager: NSObject, ObservableObject {
     /// Estimates the jitter time for typing a given text string
     /// This mirrors the extraDelay(afterTyping:) logic to provide accurate estimates
     private func estimateTextJitter(_ text: String) -> TimeInterval {
-        guard !text.isEmpty else { return 0 }
+        guard includeThinkingPauses, !text.isEmpty else { return 0 }
 
         var totalJitter: TimeInterval = 0
         let chars = Array(text)
