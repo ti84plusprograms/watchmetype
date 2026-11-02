@@ -355,7 +355,6 @@ struct ContentView: View {
     @ScaledMetric(relativeTo: .largeTitle) private var statusFontSize: CGFloat = 64
 
     @State private var showStartConfirmation: Bool = false
-    @State private var showTypingAccessibilityAlert: Bool = false
 
     // Error state for editing failures
     @State private var showEditingError: Bool = false
@@ -490,14 +489,6 @@ struct ContentView: View {
                 // Clear the error after handling
                 typingManager.lastEditingError = nil
             }
-        }
-        .alert("Accessibility permission required", isPresented: $showTypingAccessibilityAlert) {
-            Button("Open Accessibility Settings") {
-                AccessibilityPermissionHelper.requestIfNeeded()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This build of Watch Me Type needs Accessibility access to type into other apps. Enable it in System Settings > Privacy & Security > Accessibility, then retry.")
         }
         .alert("Ready to type?", isPresented: $showStartConfirmation) {
             Button("Start") {
@@ -853,7 +844,7 @@ struct ContentView: View {
 
                 Button {
                     guard AccessibilityPermissionHelper.isTrusted else {
-                        showTypingAccessibilityAlert = true
+                        showTypingAccessibilityRequiredAlert()
                         return
                     }
                     showStartConfirmation = true
@@ -2037,6 +2028,19 @@ struct ContentView: View {
 
         pendingWindowAdjustment = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + windowAdjustmentDebounce, execute: workItem)
+    }
+
+    // Re-check the active build before starting, without changing the
+    // existing settings UI or competing with SwiftUI's Ready/Edit alerts.
+    private func showTypingAccessibilityRequiredAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Accessibility permission required"
+        alert.informativeText = "This running build of Watch Me Type needs Accessibility access to type into other apps. Enable it in System Settings > Privacy & Security > Accessibility, then try again."
+        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn {
+            AccessibilityPermissionHelper.requestIfNeeded()
+        }
     }
 
     private func showAccessibilityPreflightAlert() {
