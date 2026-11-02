@@ -104,10 +104,11 @@ Tests under `Watch Me TypeTests/` cover `EditOperationConverter` (tokenisation, 
 ## Code Mode (feature branch)
 
 The original SwiftUI layout is retained. The existing **Typing Speed** card now
-includes **Code Mode**, **Thinking Pauses**, and **Simulate Mistakes** controls,
-and supports 40–400 WPM. Prose defaults remain 80 WPM, with thinking and mistakes
-on; Code Mode starts at 240 WPM with both off. Switching modes remembers each
-mode's most recent settings.
+includes **Code Mode**, **Thinking Pauses**, and **Simulate Mistakes** controls.
+The original prose slider remains **40–120 WPM**, with a default of 80 WPM,
+thinking and mistakes on. Code Mode offers **40–400 WPM**, starting at 240 WPM
+with both off. Slider endpoints and labels change with Code Mode; switching
+modes remembers each mode's most recent speed and toggle settings.
 
 **Code Mode** sends the supplied source text without running the Clean-Up
 processor. Its Clean-Up panel is disabled to protect indentation, tabs, blank
