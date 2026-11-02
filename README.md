@@ -107,8 +107,10 @@ The original SwiftUI layout is retained. The existing **Typing Speed** card now
 includes **Code Mode**, **Thinking Pauses**, and **Simulate Mistakes** controls.
 The original prose slider remains **40–120 WPM**, with a default of 80 WPM,
 thinking and mistakes on. Code Mode offers **40–400 WPM**, starting at 240 WPM
-with both off. Slider endpoints and labels change with Code Mode; switching
-modes remembers each mode's most recent speed and toggle settings.
+with both off. Slider endpoints and labels change with Code Mode. Switching modes keeps the
+current numeric WPM, capped to the destination range (e.g., 120 prose → 120
+code; 350 code → 120 prose). The slider thumb moves to the appropriate relative
+position. Thinking and mistake preferences remain independent per mode.
 
 **Code Mode** sends the supplied source text without running the Clean-Up
 processor. Its Clean-Up panel is disabled to protect indentation, tabs, blank
