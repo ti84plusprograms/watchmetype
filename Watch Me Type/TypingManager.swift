@@ -70,6 +70,7 @@ final class TypingManager: NSObject, ObservableObject {
     @Published var lastEditingPhase2Duration: TimeInterval?
     @Published var progressFraction: Double = 0.0  // 0.0 = not started, 1.0 = complete
     @Published var lastEditingError: EditingError?  // Set when editing fails, cleared after handling
+    @Published var lastTypingStartError: String?  // Actionable error when no valid typing target is available
 
     private var countdownTimer: Timer?
     private var typingStartDate: Date?
@@ -212,6 +213,7 @@ final class TypingManager: NSObject, ObservableObject {
         stateBeforePause = nil
         typingStartDate = nil
         lastRunDuration = nil
+        lastTypingStartError = nil
         progressFraction = 0.0
 
         guard !textToType.isEmpty else {
@@ -322,13 +324,31 @@ final class TypingManager: NSObject, ObservableObject {
             return
         }
 
+        // macOS can treat an Xcode-run development build and a downloaded DMG
+        // as different Accessibility clients. Refuse to run silently when denied.
+        guard AccessibilityPermissionHelper.isTrusted else {
+            stopTyping()
+            lastTypingStartError = "Accessibility access is not granted to this running build. Open System Settings > Privacy & Security > Accessibility, enable Watch Me Type (the Xcode build, if listed separately), then restart and try again."
+            return
+        }
+
+        // At the moment typing begins, record the frontmost application as the
+        // target. Never silently send keystrokes to our own floating overlay.
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
+            stopTyping()
+            lastTypingStartError = "The destination application could not be detected. Start again, and click inside the document during the countdown."
+            return
+        }
+
+        guard frontmostApp.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            stopTyping()
+            lastTypingStartError = "Watch Me Type is still the active application. Start again, then click into the destination document before the countdown finishes."
+            return
+        }
+
         typingStartDate = Date()
         progressFraction = 0.0
-
-        // At the moment typing begins, record the current frontmost app and window
-        // as the intended typing target.
-        let frontmostApp = NSWorkspace.shared.frontmostApplication
-        targetAppPID = frontmostApp?.processIdentifier
+        targetAppPID = frontmostApp.processIdentifier
         targetWindowTitle = getFocusedWindowTitle()
 
         appLog("Target app recorded - PID: \(targetAppPID ?? 0), name: '\(frontmostApp?.localizedName ?? "unknown")', window: '\(targetWindowTitle ?? "unknown")'", level: .debug)
