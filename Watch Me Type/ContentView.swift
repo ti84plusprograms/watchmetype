@@ -355,6 +355,7 @@ struct ContentView: View {
     @ScaledMetric(relativeTo: .largeTitle) private var statusFontSize: CGFloat = 64
 
     @State private var showStartConfirmation: Bool = false
+    @State private var showTypingAccessibilityAlert: Bool = false
 
     // Error state for editing failures
     @State private var showEditingError: Bool = false
@@ -462,6 +463,15 @@ struct ContentView: View {
                 }
             }
         }
+        .onChange(of: typingManager.lastTypingStartError) { _, error in
+            guard let error else { return }
+            let alert = NSAlert()
+            alert.messageText = "Typing couldn't start"
+            alert.informativeText = error
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            typingManager.lastTypingStartError = nil
+        }
         .onChange(of: typingManager.lastEditingError) { _, error in
             if let error = error {
                 editingErrorMessage = """
@@ -480,6 +490,14 @@ struct ContentView: View {
                 // Clear the error after handling
                 typingManager.lastEditingError = nil
             }
+        }
+        .alert("Accessibility permission required", isPresented: $showTypingAccessibilityAlert) {
+            Button("Open Accessibility Settings") {
+                AccessibilityPermissionHelper.requestIfNeeded()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This build of Watch Me Type needs Accessibility access to type into other apps. Enable it in System Settings > Privacy & Security > Accessibility, then retry.")
         }
         .alert("Ready to type?", isPresented: $showStartConfirmation) {
             Button("Start") {
@@ -834,6 +852,10 @@ struct ContentView: View {
                 }
 
                 Button {
+                    guard AccessibilityPermissionHelper.isTrusted else {
+                        showTypingAccessibilityAlert = true
+                        return
+                    }
                     showStartConfirmation = true
                 } label: {
                     Text("Start")
