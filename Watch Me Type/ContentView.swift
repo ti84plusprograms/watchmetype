@@ -1520,7 +1520,9 @@ struct ContentView: View {
             return Text("")
         }
 
-        let estimate = formatDurationInFiveMinuteIncrements(editTime)
+        let estimate = (codeMode || !includeThinkingPauses)
+            ? formatDuration(editTime)
+            : formatDurationInFiveMinuteIncrements(editTime)
 
         let prefix = Text("Estimated: at least ")
             .foregroundColor(.secondary)
