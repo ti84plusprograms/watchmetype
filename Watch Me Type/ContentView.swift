@@ -1489,14 +1489,20 @@ struct ContentView: View {
     }
 
     private var estimatedTimeText: Text {
-        guard let minutes = estimatedMinutes else {
+        guard let seconds = estimatedTypingSeconds else {
             return Text("")
         }
 
         let prefix = Text("Estimated: at least ")
             .foregroundColor(.secondary)
 
-        let number = Text("\(minutes)m")
+        let duration: String
+        if seconds < 60 {
+            duration = "\(max(1, Int(ceil(seconds))))s"
+        } else {
+            duration = "\(max(1, Int(round(seconds / 60))))m"
+        }
+        let number = Text(duration)
             .bold()
             .foregroundColor(highlightEstimate ? .accentColor : .primary)
 
