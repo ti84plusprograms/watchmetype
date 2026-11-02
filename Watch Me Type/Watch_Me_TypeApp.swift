@@ -23,7 +23,7 @@ struct Watch_Me_TypeApp: App {
         .defaultSize(width: 1000, height: 840)
         .commands {
             CommandGroup(after: .appInfo) {
-                Button("Check for Updates…") {
+                Button(String(localized: "Check for Updates…", defaultValue: "Check for Updates…")) {
                     updaterController.checkForUpdates(nil)
                 }
             }
