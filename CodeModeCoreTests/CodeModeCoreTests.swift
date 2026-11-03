@@ -63,6 +63,14 @@ final class CodeModeCoreTests: XCTestCase {
         XCTAssertEqual(apply(CodeInputCore.changedLineRegion(from: old, to: new), to: old), new)
     }
 
+    func testLineCountWithUnixWindowsAndClassicMacLineEndings() {
+        XCTAssertEqual(CodeInputCore.lineCount(in: ""), 0)
+        XCTAssertEqual(CodeInputCore.lineCount(in: "def f():\n    pass\n"), 3)
+        XCTAssertEqual(CodeInputCore.lineCount(in: "a\r\nb\r\n"), 3)
+        XCTAssertEqual(CodeInputCore.lineCount(in: "a\rb\r"), 3)
+        XCTAssertEqual(CodeInputCore.lineCount(in: "  only spaces  "), 1)
+    }
+
     func testStructuralPacing() {
         XCTAssertGreaterThanOrEqual(CodeInputCore.minimumDelay(after: "\n"), 0.1)
         XCTAssertGreaterThanOrEqual(CodeInputCore.minimumDelay(after: "\t"), 0.1)
