@@ -72,10 +72,9 @@ final class PythonLineNumberRulerView: NSRulerView {
 
         let initial = min(visibleCharacters.location, size)
         var index = source.lineRange(for: NSRange(location: initial, length: 0)).location
+        // Use the shared line-ending policy so CRLF counts as one line.
         let prefix = source.substring(to: index)
-        var lineNumber = prefix.reduce(into: 1) { result, c in
-            if c == "\n" { result += 1 }
-        }
+        var lineNumber = max(1, CodeInputCore.lineCount(in: prefix))
 
         let style: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
