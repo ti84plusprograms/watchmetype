@@ -116,6 +116,32 @@ position. Thinking and mistake preferences remain independent per mode.
 processor. Its Clean-Up panel is disabled to protect indentation, tabs, blank
 lines, and trailing whitespace. Normal prose cleanup remains available.
 
+### Python-first code editor
+
+Switching on **Code Mode** changes the appearance of all visible Draft editors
+without changing their source strings: monospaced font, tinted editor background,
+distinct border, PYTHON indicator, a scroll-synchronized line-number gutter,
+and line/character counts in place of prose word counts. Returning to Normal
+Mode restores the original appearance and the original macOS text-input
+preferences. Code Mode disables smart quotes, smart dashes, automatic spelling
+correction, text replacement, and automatic text completion inside Watch Me Type
+so Python punctuation is not silently rewritten.
+
+The Python lexer colors common keywords, definitions, decorators, built-ins,
+numbers, constants, comments, and single/double/triple-quoted strings (including
+simple string prefixes and f-strings). Coloring uses temporary TextKit layout
+attributes, leaving the backing plain text, selection, and undo history intact.
+This is *syntax highlighting*, not a compiler or full Python parser. Complex
+f-string interpolation and arbitrary-language detection are not implemented.
+Non-Python code remains unmodified but may receive misleading Python colors;
+for now the language indicator explicitly says **PYTHON**.
+
+The SwiftPM test target runs regression cases for Unicode UTF-16 highlight
+ranges, quoted hash characters, triple-quoted strings, decorators, escapes,
+and untouched source text. GitHub Actions also compiles the AppKit UI; it does
+not test actual interaction, scrolling or macOS Accessibility behavior, which
+must be verified in Xcode.
+
 **Code Input** uses an extra compact control inside the existing Typing Speed
 card. **Simulated** types characters individually (with a longer pause after
 newlines, tabs, and brackets to give editors time to process them); it may still
