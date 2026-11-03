@@ -96,7 +96,6 @@ struct NativeTextEditor: NSViewRepresentable {
         var text: Binding<String>
         var isFocused: Binding<Bool>?
         private var codeMode = false
-        private var styledText: String?
         private var pendingHighlight: DispatchWorkItem?
         private var scrollObserver: NSObjectProtocol?
         private weak var gutter: PythonLineNumberRulerView?
@@ -172,10 +171,11 @@ struct NativeTextEditor: NSViewRepresentable {
                 scrollView.rulersVisible = enabled
             }
 
-            if switched || force || (enabled && styledText != textView.string) {
+            // User typing is highlighted after a brief debounce in textDidChange.
+            // Don't synchronously re-lex the full buffer on every SwiftUI update.
+            if switched || force {
                 pendingHighlight?.cancel()
                 CodeEditorAppearance.highlight(textView, enabled: enabled)
-                styledText = enabled ? textView.string : nil
                 gutter?.needsDisplay = true
             }
         }
@@ -189,7 +189,6 @@ struct NativeTextEditor: NSViewRepresentable {
             let update = DispatchWorkItem { [weak self, weak textView] in
                 guard let self, let textView, self.codeMode else { return }
                 CodeEditorAppearance.highlight(textView, enabled: true)
-                self.styledText = textView.string
                 self.gutter?.needsDisplay = true
             }
             pendingHighlight = update
@@ -292,7 +291,7 @@ private struct DraftEditor: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(8)
 
-            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if isCodeMode ? text.isEmpty : text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(placeholder)
                     .foregroundColor(.secondary)
                     .font(isCodeMode ? .system(.body, design: .monospaced) : .body)
@@ -840,10 +839,7 @@ struct ContentView: View {
 
     private func draftStatus(for text: String) -> String {
         guard codeMode else { return "\(wordCount(of: text)) words" }
-        let lines = text.isEmpty ? 0 : text.reduce(into: 1) { count, character in
-            if character == "\n" { count += 1 }
-        }
-        return "\(lines) lines · \(text.count) characters"
+        return "\(CodeInputCore.lineCount(in: text)) lines · \(text.count) characters"
     }
 
     @ViewBuilder
