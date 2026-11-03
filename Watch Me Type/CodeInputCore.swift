@@ -57,6 +57,23 @@ enum CodeInputCore {
         return CodeLineReplacement(position: position, removed: removed, inserted: inserted)
     }
 
+    /// Logical line count including a trailing empty line. Handles CR, LF,
+    /// and CRLF as one line break without altering source bytes.
+    static func lineCount(in source: String) -> Int {
+        guard !source.isEmpty else { return 0 }
+        var count = 1
+        var previousWasCR = false
+        for unit in source.utf16 {
+            if unit == 13 {
+                count += 1
+            } else if unit == 10 && !previousWasCR {
+                count += 1
+            }
+            previousWasCR = (unit == 13)
+        }
+        return count
+    }
+
     /// Give editors time to process structural keys; WPM remains the base
     /// speed, but bursty punctuation/newlines are deliberately slower.
     static func minimumDelay(after character: Character) -> TimeInterval {
