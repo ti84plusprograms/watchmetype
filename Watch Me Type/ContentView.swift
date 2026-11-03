@@ -265,6 +265,7 @@ private struct DraftEditor: View {
     var showsTitle: Bool = true
     var cornerStyle: DraftEditorCornerStyle = .full
     var focusOnAppear: Bool = false
+    var isCodeMode: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -285,7 +286,8 @@ private struct DraftEditor: View {
                 text: $text,
                 accessibilityLabel: editorAccessibilityLabel,
                 isFocused: $isFocused,
-                focusOnAppear: focusOnAppear
+                focusOnAppear: focusOnAppear,
+                isCodeMode: isCodeMode
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(8)
@@ -293,6 +295,7 @@ private struct DraftEditor: View {
             if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(placeholder)
                     .foregroundColor(.secondary)
+                    .font(isCodeMode ? .system(.body, design: .monospaced) : .body)
                     .padding(.top, 9)
                     .padding(.leading, 13)
                     .allowsHitTesting(false)
@@ -305,18 +308,19 @@ private struct DraftEditor: View {
             core
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color(NSColor.textBackgroundColor))
+                        .fill(isCodeMode ? Color(NSColor.controlBackgroundColor) : Color(NSColor.textBackgroundColor))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(isFocused ? Color.accentColor : Color.secondary.opacity(0.3),
+                        .stroke(isFocused ? Color.accentColor
+                                : (isCodeMode ? Color.blue.opacity(0.5) : Color.secondary.opacity(0.3)),
                                 lineWidth: isFocused ? 2 : 1)
                 )
                 .animation(.easeOut(duration: 0.15), value: isFocused)
 
         case .bare:
             core
-                .background(Color(NSColor.textBackgroundColor))
+                .background(isCodeMode ? Color(NSColor.controlBackgroundColor) : Color(NSColor.textBackgroundColor))
         }
     }
 }
@@ -717,9 +721,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             EqualWidthHStack(spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Draft 1")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                    draftHeader("Draft 1")
 
                     draftEditorView(
                         title: "Draft 1",
@@ -736,7 +738,7 @@ struct ContentView: View {
                         Toggle("I have a draft 2.", isOn: $showDraft2)
                             .font(.caption)
                         Spacer()
-                        Text("\(wordCount(of: inputText)) words")
+                        Text(draftStatus(for: inputText))
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -745,9 +747,7 @@ struct ContentView: View {
 
                 if showDraft2 {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Draft 2")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                        draftHeader("Draft 2")
 
                         fusedDraftPanel(
                             focused: isDraft2EditorFocused,
@@ -769,7 +769,7 @@ struct ContentView: View {
                             Toggle("I have a draft 3.", isOn: $showDraft3)
                                 .font(.caption)
                             Spacer()
-                            Text("\(wordCount(of: inputTextDraft2)) words")
+                            Text(draftStatus(for: inputTextDraft2))
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -779,9 +779,7 @@ struct ContentView: View {
 
                 if showDraft2 && showDraft3 {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Draft 3")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                        draftHeader("Draft 3")
 
                         fusedDraftPanel(
                             focused: isDraft3EditorFocused,
@@ -805,7 +803,7 @@ struct ContentView: View {
                                 .font(.caption)
                                 .hidden()
                             Spacer()
-                            Text("\(wordCount(of: inputTextDraft3)) words")
+                            Text(draftStatus(for: inputTextDraft3))
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -821,6 +819,31 @@ struct ContentView: View {
 
     private func wordCount(of text: String) -> Int {
         text.split(omittingEmptySubsequences: true, whereSeparator: { $0.isWhitespace || $0.isNewline }).count
+    }
+
+    private func draftHeader(_ name: String) -> some View {
+        HStack(spacing: 7) {
+            Text(name)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            if codeMode {
+                Text("PYTHON")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.blue.opacity(0.10)))
+                    .accessibilityLabel("Python code editor active")
+            }
+        }
+    }
+
+    private func draftStatus(for text: String) -> String {
+        guard codeMode else { return "\(wordCount(of: text)) words" }
+        let lines = text.isEmpty ? 0 : text.reduce(into: 1) { count, character in
+            if character == "\n" { count += 1 }
+        }
+        return "\(lines) lines · \(text.count) characters"
     }
 
     @ViewBuilder
@@ -899,7 +922,8 @@ struct ContentView: View {
             isFocused: isFocused,
             showsTitle: showsTitle,
             cornerStyle: cornerStyle,
-            focusOnAppear: focusOnAppear
+            focusOnAppear: focusOnAppear,
+            isCodeMode: codeMode
         )
     }
 
