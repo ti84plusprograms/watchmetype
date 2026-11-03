@@ -325,6 +325,28 @@ enum EditSortDirection {
     case leftToRight  // New: sort ascending by position
 }
 
+/// One line-aware replacement for code. It preserves indentation and every
+/// unchanged line rather than relying on sentence boundaries and word similarity.
+func convertCodeDraftsToPositionedEdits(draft1: String, draft2: String) -> [EditWithPosition] {
+    guard let difference = CodeInputCore.changedLineRegion(from: draft1, to: draft2) else {
+        return []
+    }
+
+    let operation: EditOperation
+    if difference.removed.isEmpty {
+        operation = .insert(text: difference.inserted)
+    } else if difference.inserted.isEmpty {
+        operation = .delete(count: difference.removed.count, expectedText: difference.removed)
+    } else {
+        operation = .replace(
+            oldCount: difference.removed.count,
+            newText: difference.inserted,
+            expectedOldText: difference.removed
+        )
+    }
+    return [EditWithPosition(operation: operation, position: difference.position, originalIndex: 0)]
+}
+
 /// Converts two drafts into positioned edit operations
 /// Returns edits sorted by the specified direction (default: right to left for backward compatibility)
 func convertDraftsToPositionedEdits(
