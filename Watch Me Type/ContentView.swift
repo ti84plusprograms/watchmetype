@@ -266,6 +266,7 @@ struct ContentView: View {
     @State private var inputText: String = ""
     @State private var targetWPM: Double = 80
     @State private var codeMode: Bool = false
+    @State private var codeInputStrategy: CodeInputStrategy = .simulated
     @State private var includeThinkingPauses: Bool = true
     @State private var simulateMistakes: Bool = true
     @State private var prosePreferences = TypingPreferences(thinking: true, mistakes: true)
@@ -515,17 +516,19 @@ struct ContentView: View {
                         editingDuration2: editingDuration2Seconds,
                         simulateMistakes: simulateMistakes,
                         includeThinkingPauses: includeThinkingPauses,
-                        codeMode: codeMode
+                        codeMode: codeMode,
+                        codeInputStrategy: codeInputStrategy
                     )
                 } else {
                     typingManager.startTyping(
                         text: inputText,
                         wpm: Int(targetWPM),
                         countdown: 10,
-                        totalDurationSeconds: desiredDurationSeconds,
+                        totalDurationSeconds: (codeMode && codeInputStrategy == .exactInsert) ? nil : desiredDurationSeconds,
                         simulateMistakes: simulateMistakes,
                         includeThinkingPauses: includeThinkingPauses,
-                        codeMode: codeMode
+                        codeMode: codeMode,
+                        codeInputStrategy: codeInputStrategy
                     )
                 }
             }
@@ -987,7 +990,23 @@ struct ContentView: View {
 
                 Toggle("Code Mode", isOn: codeModeBinding)
                     .font(.subheadline)
-                    .help("Preserve source whitespace exactly; disable Clean-Up. Turn off auto-indentation and formatting in the target editor.")
+                    .help("Preserve source whitespace; choose between simulated keystrokes and exact insertion.")
+
+                if codeMode {
+                    Picker("Code Input", selection: $codeInputStrategy) {
+                        Text("Simulated").tag(CodeInputStrategy.simulated)
+                        Text("Exact Insert").tag(CodeInputStrategy.exactInsert)
+                    }
+                    .pickerStyle(.segmented)
+                    .font(.subheadline)
+                    .help("Exact Insert pastes source as one block; it does not simulate typing.")
+
+                    if codeInputStrategy == .exactInsert {
+                        Text("Pastes source as a single block and restores the clipboard when possible. Destination editors may format pasted code. Draft 2/3 revisions still use simulated edits.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
 
                 Toggle("Thinking Pauses", isOn: $includeThinkingPauses)
                     .font(.subheadline)
@@ -997,18 +1016,19 @@ struct ContentView: View {
                     .font(.subheadline)
                     .help("Occasionally type an incorrect letter and correct it.")
 
-                if codeMode {
-                    Text("Preserves spaces, tabs and line breaks. Turn off auto-indent, auto-format and bracket completion in the target editor.")
+                if codeMode && codeInputStrategy == .simulated {
+                    Text("Preserves source whitespace. Disable auto-indent, auto-format and bracket completion in the target IDE when simulating typing.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
                 Toggle("Custom Typing Duration", isOn: $useTotalTime)
                     .font(.subheadline)
-                    .help("Override the estimated typing time with a specific duration")
+                    .disabled(codeMode && codeInputStrategy == .exactInsert)
+                    .help("Override the estimated typing time. Exact Insert cannot simulate a longer typing duration.")
 
                 VStack(alignment: .leading, spacing: 6) {
-                    if useTotalTime {
+                    if useTotalTime && !(codeMode && codeInputStrategy == .exactInsert) {
                         customDurationPicker
                     } else {
                         estimatedTimeText
@@ -1577,6 +1597,9 @@ struct ContentView: View {
     }
 
     private var estimatedTypingSeconds: TimeInterval? {
+        if codeMode && codeInputStrategy == .exactInsert && !inputText.isEmpty {
+            return 2 // A single paste; editor processing time may vary.
+        }
         let characterCount = inputText.count
         guard characterCount > 0 else { return nil }
         let charactersPerMinute = max(5.0, targetWPM * 5.0)
