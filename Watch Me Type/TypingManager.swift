@@ -853,6 +853,84 @@ final class TypingManager: NSObject, ObservableObject {
     
     // MARK: - Event sending
     
+    // MARK: - Exact Code Insertion
+
+    /// Opt-in Paste, rather than per-character Return and indentation events.
+    /// Some IDEs may still format text on paste.
+    private func performExactCodeInsertion() {
+        guard state == .typing, isTargetWindowFocused() else {
+            stopTyping()
+            lastTypingStartError = "The destination editor lost focus before exact insertion."
+            return
+        }
+
+        let pasteboard = NSPasteboard.general
+        var preserved: [NSPasteboardItem] = []
+
+        // Preserve every readable clipboard representation without logging data.
+        for item in pasteboard.pasteboardItems ?? [] {
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                guard let data = item.data(forType: type) else {
+                    stopTyping()
+                    lastTypingStartError = "The clipboard contains an item that cannot be preserved. Try Simulated Typing."
+                    return
+                }
+                copy.setData(data, forType: type)
+            }
+            preserved.append(copy)
+        }
+        preservedPasteboardItems = preserved
+
+        pasteboard.clearContents()
+        guard pasteboard.setString(String(textToType), forType: .string) else {
+            restorePasteboardIfUnchanged(force: true)
+            stopTyping()
+            lastTypingStartError = "Unable to prepare the clipboard for exact insertion."
+            return
+        }
+        insertedPasteboardChangeCount = pasteboard.changeCount
+
+        // Standard macOS Command+V. The target editor decides how Paste behaves.
+        let source = CGEventSource(stateID: .hidSystemState)
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) else {
+            restorePasteboardIfUnchanged()
+            stopTyping()
+            lastTypingStartError = "Unable to create the Paste keyboard event."
+            return
+        }
+        down.flags = .maskCommand
+        up.flags = .maskCommand
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+
+        // Allow the IDE to read Paste before restoring the user's clipboard.
+        // A clipboard change made by another app is never overwritten.
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            self.restorePasteboardIfUnchanged()
+            guard self.state == .typing else { return }
+            self.currentIndex = self.textToType.count
+            self.progressFraction = 1
+            self.finishTyping()
+        }
+        typingWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: workItem)
+    }
+
+    private func restorePasteboardIfUnchanged(force: Bool = false) {
+        guard let preserved = preservedPasteboardItems else { return }
+        let pasteboard = NSPasteboard.general
+        if force || (insertedPasteboardChangeCount != nil
+                     && pasteboard.changeCount == insertedPasteboardChangeCount) {
+            pasteboard.clearContents()
+            if !preserved.isEmpty { _ = pasteboard.writeObjects(preserved) }
+        }
+        preservedPasteboardItems = nil
+        insertedPasteboardChangeCount = nil
+    }
+
     private func sendCharacter(_ character: Character) {
         let source = CGEventSource(stateID: .hidSystemState)
 
