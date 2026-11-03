@@ -33,6 +33,7 @@ struct NativeTextEditor: NSViewRepresentable {
     var accessibilityLabel: String = "Text editor"
     var isFocused: Binding<Bool>? = nil
     var focusOnAppear: Bool = false
+    var isCodeMode: Bool = false
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = FixedIntrinsicScrollView()
@@ -67,6 +68,8 @@ struct NativeTextEditor: NSViewRepresentable {
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
 
+        context.coordinator.configure(textView: textView, scrollView: scrollView, codeMode: isCodeMode, force: true)
+
         if focusOnAppear {
             DispatchQueue.main.async {
                 textView.window?.makeFirstResponder(textView)
@@ -78,9 +81,11 @@ struct NativeTextEditor: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
-        if textView.string != text {
+        let contentChanged = textView.string != text
+        if contentChanged {
             textView.string = text
         }
+        context.coordinator.configure(textView: textView, scrollView: scrollView, codeMode: isCodeMode, force: contentChanged)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -90,15 +95,105 @@ struct NativeTextEditor: NSViewRepresentable {
     class Coordinator: NSObject, NSTextViewDelegate {
         var text: Binding<String>
         var isFocused: Binding<Bool>?
+        private var codeMode = false
+        private var styledText: String?
+        private var pendingHighlight: DispatchWorkItem?
+        private var scrollObserver: NSObjectProtocol?
+        private weak var gutter: PythonLineNumberRulerView?
+
+        // Remember how the original prose editor was configured so toggling
+        // Code Mode off restores native text-input behavior.
+        private struct InputSettings {
+            var quoteSubstitution: Bool
+            var dashSubstitution: Bool
+            var spellingCorrection: Bool
+            var textReplacement: Bool
+            var completion: Bool
+        }
+        private var proseInputSettings: InputSettings?
 
         init(text: Binding<String>, isFocused: Binding<Bool>?) {
             self.text = text
             self.isFocused = isFocused
         }
 
+        deinit {
+            pendingHighlight?.cancel()
+            if let scrollObserver {
+                NotificationCenter.default.removeObserver(scrollObserver)
+            }
+        }
+
+        func configure(textView: NSTextView, scrollView: NSScrollView, codeMode enabled: Bool, force: Bool = false) {
+            let switched = codeMode != enabled
+            codeMode = enabled
+
+            if proseInputSettings == nil {
+                proseInputSettings = InputSettings(
+                    quoteSubstitution: textView.isAutomaticQuoteSubstitutionEnabled,
+                    dashSubstitution: textView.isAutomaticDashSubstitutionEnabled,
+                    spellingCorrection: textView.isAutomaticSpellingCorrectionEnabled,
+                    textReplacement: textView.isAutomaticTextReplacementEnabled,
+                    completion: textView.isAutomaticTextCompletionEnabled
+                )
+            }
+
+            if switched || force {
+                let original = proseInputSettings!
+                textView.isAutomaticQuoteSubstitutionEnabled = enabled ? false : original.quoteSubstitution
+                textView.isAutomaticDashSubstitutionEnabled = enabled ? false : original.dashSubstitution
+                textView.isAutomaticSpellingCorrectionEnabled = enabled ? false : original.spellingCorrection
+                textView.isAutomaticTextReplacementEnabled = enabled ? false : original.textReplacement
+                textView.isAutomaticTextCompletionEnabled = enabled ? false : original.completion
+            }
+
+            let desiredFont = enabled
+                ? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+                : NSFont.systemFont(ofSize: NSFont.systemFontSize)
+            if switched || force {
+                if textView.font != desiredFont { textView.font = desiredFont }
+            }
+
+            if gutter == nil {
+                let newGutter = PythonLineNumberRulerView(scrollView: scrollView, editor: textView)
+                scrollView.verticalRulerView = newGutter
+                gutter = newGutter
+                scrollView.contentView.postsBoundsChangedNotifications = true
+                scrollObserver = NotificationCenter.default.addObserver(
+                    forName: NSView.boundsDidChangeNotification,
+                    object: scrollView.contentView,
+                    queue: .main
+                ) { [weak newGutter] _ in
+                    newGutter?.needsDisplay = true
+                }
+            }
+            if scrollView.hasVerticalRuler != enabled || scrollView.rulersVisible != enabled {
+                scrollView.hasVerticalRuler = enabled
+                scrollView.rulersVisible = enabled
+            }
+
+            if switched || force || (enabled && styledText != textView.string) {
+                pendingHighlight?.cancel()
+                CodeEditorAppearance.highlight(textView, enabled: enabled)
+                styledText = enabled ? textView.string : nil
+                gutter?.needsDisplay = true
+            }
+        }
+
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             text.wrappedValue = textView.string
+            guard codeMode else { return }
+
+            pendingHighlight?.cancel()
+            let update = DispatchWorkItem { [weak self, weak textView] in
+                guard let self, let textView, self.codeMode else { return }
+                CodeEditorAppearance.highlight(textView, enabled: true)
+                self.styledText = textView.string
+                self.gutter?.needsDisplay = true
+            }
+            pendingHighlight = update
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.07, execute: update)
         }
 
         func handleFocusChange(_ focused: Bool) {
