@@ -551,6 +551,13 @@ final class TypingManager: NSObject, ObservableObject {
     private func pauseTyping() {
         guard state == .typing else { return }
 
+        // Exact Insert has already sent one atomic Paste event. Keep the
+        // scheduled clipboard-restoration completion even if focus changes.
+        if isCodeMode && codeInputStrategy == .exactInsert
+            && preservedPasteboardItems != nil {
+            return
+        }
+
         // Record what state we're pausing from (for correct resume)
         stateBeforePause = .typing
 
