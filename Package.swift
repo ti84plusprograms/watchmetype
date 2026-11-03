@@ -13,7 +13,7 @@ let package = Package(
         .target(
             name: "CodeModeCore",
             path: "Watch Me Type",
-            sources: ["CodeInputCore.swift"]
+            sources: ["CodeInputCore.swift", "PythonSyntaxHighlighter.swift"]
         ),
         .testTarget(
             name: "CodeModeCoreTests",
