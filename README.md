@@ -105,9 +105,9 @@ Tests under `Watch Me TypeTests/` cover `EditOperationConverter` (tokenisation, 
 
 The original SwiftUI layout is retained. The existing **Typing Speed** card now
 includes **Code Mode**, **Thinking Pauses**, and **Simulate Mistakes** controls.
-The original prose slider remains **40–120 WPM**, with a default of 80 WPM,
-thinking and mistakes on. Code Mode offers **40–400 WPM**, starting at 240 WPM
-with both off. Slider endpoints and labels change with Code Mode. Switching modes keeps the
+The original prose slider remains **40–120 WPM**, initially at 80 WPM with
+thinking and mistakes on. Code Mode offers **40–400 WPM**, with thinking and
+mistakes initially off; it retains the current numeric WPM when switched on. Slider endpoints and labels change with Code Mode. Switching modes keeps the
 current numeric WPM, capped to the destination range (e.g., 120 prose → 120
 code; 350 code → 120 prose). The slider thumb moves to the appropriate relative
 position. Thinking and mistake preferences remain independent per mode.
@@ -116,12 +116,27 @@ position. Thinking and mistake preferences remain independent per mode.
 processor. Its Clean-Up panel is disabled to protect indentation, tabs, blank
 lines, and trailing whitespace. Normal prose cleanup remains available.
 
-**Destination-editor setup matters:** the app sends actual Return keys for
-newlines. An IDE may insert automatic indentation or matching brackets on
-its own, so disable auto-indent, automatic formatting, bracket pairing,
-completion, and autocorrect in the *destination editor* before testing exact
-code reproduction. The app does not inspect or configure those external
-settings, and reliable code behavior depends on the destination editor.
+**Code Input** uses an extra compact control inside the existing Typing Speed
+card. **Simulated** types characters individually (with a longer pause after
+newlines, tabs, and brackets to give editors time to process them); it may still
+be affected by an IDE's automatic indentation, brace completion, or formatting.
+For simulated typing, disable auto-indent, format-on-type, automatic bracket
+pairing, completion, and autocorrect in the destination editor.
+
+**Exact Insert** instead issues a single standard macOS Paste command with
+the complete source text. This avoids per-Return autoindent and per-character
+bracket completion. The clipboard's readable formats are restored after the
+IDE has time to consume the paste, provided no other process has changed the
+clipboard in the meantime. Some IDEs format pasted text; disable format-on-paste
+to improve fidelity. Exact Insert is one bulk insertion, not simulated typing,
+does not honor Custom Typing Duration, and does not verify the resulting text.
+Draft 2/3 revision phases still use simulated edits.
+
+**Code revisions** use a deterministic line-aligned changed region, avoiding
+sentence and word similarity heuristics. This is intentionally conservative:
+a change spanning many lines can retype the full changed section. Prose
+revisions continue using the original algorithm. This application cannot
+guarantee exact behavior in every third-party editor.
 
 **Thinking Pauses** controls random word, punctuation, and paragraph delays
 during both typing and revisions. An explicit **Custom Duration** can still
@@ -146,9 +161,9 @@ works but a browser editor does not, investigate the browser's text focus and
 autocorrection behavior. The source cannot verify delivery into every
 third-party editor.
 
-The feature's original two- and three-draft revision algorithms remain
-unchanged. The experimental *edit already existing Google Doc* branch is
-not included.
+Normal prose mode and its revision algorithm remain unchanged. Code Mode
+alone uses the line-aware diff. The experimental *edit already existing Google
+Doc* branch is not included.
 
 ## Usage notes
 
@@ -177,9 +192,25 @@ xcodebuild -project "Watch Me Type.xcodeproj" -scheme "Watch Me Type" -destinati
 
 ## Run tests
 
+The Xcode project currently has **no XCTest target**. The existing
+`Watch Me TypeTests` source files are not connected to its scheme, so
+`xcodebuild test` is **not** a valid test command for this project.
+
+Code Mode's cross-platform parsing/diff tests are connected to a standalone
+Swift package. Run them with:
+
 ```bash
-xcodebuild -project "Watch Me Type.xcodeproj" -scheme "Watch Me Type" -destination 'platform=macOS' test
+swift test --package-path .
 ```
+
+The `.github/workflows/macos-code-mode.yml` workflow runs that test command
+and builds the macOS application with signing disabled on `macos-15` using
+Xcode 26.3. It records the checked-out commit, runner, Xcode/Swift versions,
+SHA-256 checksums of the evidence, and logs as run artifacts. The CI evidence
+does **not** include an installable build because the project's source-available
+license prohibits redistribution of modified binaries without permission.
+It also cannot test whether macOS Accessibility keystrokes are accepted
+inside a particular IDE; that still requires a manually authorized GUI session.
 
 ## Contributing
 
