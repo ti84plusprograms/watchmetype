@@ -82,6 +82,9 @@ final class TypingManager: NSObject, ObservableObject {
     private var interCharacterDelay: TimeInterval = 0.05
     private var includeThinkingPauses: Bool = true
     private var isCodeMode: Bool = false
+    private var codeInputStrategy: CodeInputStrategy = .simulated
+    private var preservedPasteboardItems: [NSPasteboardItem]?
+    private var insertedPasteboardChangeCount: Int?
 
     // Keep the original prose insertion speed; allow faster code inserts.
     private var editCharacterDelay: TimeInterval {
@@ -190,9 +193,11 @@ final class TypingManager: NSObject, ObservableObject {
         totalDurationSeconds: TimeInterval? = nil,
         simulateMistakes: Bool = false,
         includeThinkingPauses: Bool = true,
-        codeMode: Bool = false
+        codeMode: Bool = false,
+        codeInputStrategy: CodeInputStrategy = .simulated
     ) {
         // Reset any existing timers/state
+        restorePasteboardIfUnchanged()
         countdownTimer?.invalidate()
         typingWorkItem?.cancel()
 
@@ -204,6 +209,7 @@ final class TypingManager: NSObject, ObservableObject {
         shouldSimulateMistakes = simulateMistakes
         self.includeThinkingPauses = includeThinkingPauses
         isCodeMode = codeMode
+        self.codeInputStrategy = codeMode ? codeInputStrategy : .simulated
         charactersTypedSinceLastMistake = 0
         nextMistakeInCharacters = Int.random(in: 50...75)
         extraDelayPerSentenceEnd = 0
@@ -280,6 +286,7 @@ final class TypingManager: NSObject, ObservableObject {
     }
     
     func stopTyping() {
+        restorePasteboardIfUnchanged()
         countdownTimer?.invalidate()
         countdownTimer = nil
 
@@ -363,7 +370,11 @@ final class TypingManager: NSObject, ObservableObject {
         // Start periodic focus check (every 0.5 seconds) as safety net
         startPeriodicFocusCheck()
 
-        scheduleNextCharacter(after: interCharacterDelay)
+        if isCodeMode && codeInputStrategy == .exactInsert {
+            performExactCodeInsertion()
+        } else {
+            scheduleNextCharacter(after: interCharacterDelay)
+        }
     }
     
     private func scheduleNextCharacter(after delay: TimeInterval) {
@@ -424,7 +435,10 @@ final class TypingManager: NSObject, ObservableObject {
         sendCharacter(character)
         
         let extra = extraDelay(afterTyping: character)
-        let nextDelay = interCharacterDelay + extra
+        let baseDelay = isCodeMode
+            ? max(interCharacterDelay, CodeInputCore.minimumDelay(after: character))
+            : interCharacterDelay
+        let nextDelay = baseDelay + extra
         
         previousCharacter = character
         
@@ -1091,8 +1105,10 @@ final class TypingManager: NSObject, ObservableObject {
             return 0
         }
 
-        // Compute the edit operations
-        let edits = convertDraftsToPositionedEdits(draft1: draft1, draft2: draft2)
+        // Never run sentence-based prose heuristics on code.
+        let edits = codeMode
+            ? convertCodeDraftsToPositionedEdits(draft1: draft1, draft2: draft2)
+            : convertDraftsToPositionedEdits(draft1: draft1, draft2: draft2)
 
         if edits.isEmpty {
             return 0
@@ -1176,7 +1192,8 @@ final class TypingManager: NSObject, ObservableObject {
         editingDuration2: TimeInterval? = nil,
         simulateMistakes: Bool = false,
         includeThinkingPauses: Bool = true,
-        codeMode: Bool = false
+        codeMode: Bool = false,
+        codeInputStrategy: CodeInputStrategy = .simulated
     ) {
         self.draft2Text = draft2
         self.customEditingDuration = editingDuration
@@ -1190,7 +1207,8 @@ final class TypingManager: NSObject, ObservableObject {
             totalDurationSeconds: typingDuration,
             simulateMistakes: simulateMistakes,
             includeThinkingPauses: includeThinkingPauses,
-            codeMode: codeMode
+            codeMode: codeMode,
+            codeInputStrategy: codeInputStrategy
         )
     }
 
@@ -1209,7 +1227,9 @@ final class TypingManager: NSObject, ObservableObject {
         appLog("Starting backwards editing - Draft 1: \(draft1.count) chars, Draft 2: \(draft2.count) chars", level: .info)
 
         // Step 1: Compute positioned edits (sorted right-to-left)
-        positionedEdits = convertDraftsToPositionedEdits(draft1: draft1, draft2: draft2)
+        positionedEdits = isCodeMode
+            ? convertCodeDraftsToPositionedEdits(draft1: draft1, draft2: draft2)
+            : convertDraftsToPositionedEdits(draft1: draft1, draft2: draft2)
         appLog("Generated \(positionedEdits.count) positioned edits", level: .debug)
 
         // Step 2: Initialize editing state
@@ -1761,7 +1781,9 @@ final class TypingManager: NSObject, ObservableObject {
         previousCharacter = editCharPreviousChar
 
         // Calculate delay using the same extraDelay logic as typing phase
-        let baseDelay = editCharacterDelay
+        let baseDelay = isCodeMode
+            ? max(editCharacterDelay, CodeInputCore.minimumDelay(after: character))
+            : editCharacterDelay
         let extra = extraDelay(afterTyping: character)
         let nextDelay = (baseDelay + extra) * editingDelayMultiplier
 
@@ -1885,7 +1907,9 @@ final class TypingManager: NSObject, ObservableObject {
 
         appLog("Starting forward editing - Draft 2: \(draft2.count) chars, Draft 3: \(draft3.count) chars, cursor at \(actualCursorPosition)", level: .info)
 
-        positionedEdits = convertDraftsToPositionedEdits(draft1: draft2, draft2: draft3, direction: .leftToRight)
+        positionedEdits = isCodeMode
+            ? convertCodeDraftsToPositionedEdits(draft1: draft2, draft2: draft3)
+            : convertDraftsToPositionedEdits(draft1: draft2, draft2: draft3, direction: .leftToRight)
         appLog("Generated \(positionedEdits.count) forward edits", level: .debug)
 
         progressText = "Editing Draft 2 into Draft 3..."
