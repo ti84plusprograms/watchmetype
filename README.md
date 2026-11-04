@@ -182,10 +182,11 @@ xcrun xcresulttool export attachments \
 ```
 
 Use a new `.xcresult` path for each run. CI uploads screenshots, the result
-bundle, and logs even on UI-test failure. These tests check accessibility
-elements and text values but cannot independently prove that pixels are
-correct: **inspect screenshots** for visible code, caret, headers, and gutters.
-No reference-image baseline or pixel diff is enabled. GitHub-hosted macOS
+bundle, and logs even on UI-test failure. The multiline Python test
+also samples pixels away from the gutter to catch fully invisible glyphs.
+This is a coarse sanity check, not a reference-image comparison:
+**inspect screenshots** for syntax coloring, caret, headers, and gutters.
+No full pixel-diff baseline is enabled. GitHub-hosted macOS
 runners may lack usable interactive GUI automation; in that case use a
 local unlocked Mac or an authorized self-hosted macOS runner.
 
