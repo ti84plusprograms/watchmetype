@@ -296,7 +296,7 @@ private struct DraftEditor: View {
                     .foregroundColor(.secondary)
                     .font(isCodeMode ? .system(.body, design: .monospaced) : .body)
                     .padding(.top, 9)
-                    .padding(.leading, 13)
+                    .padding(.leading, 13 + (isCodeMode ? PythonLineNumberRulerView.gutterWidth : 0))
                     .allowsHitTesting(false)
             }
         }
@@ -706,6 +706,9 @@ struct ContentView: View {
             minWidth: isOverlayVisible ? defaultWindowWidth * 0.5 : idealWindowWidth,
             idealWidth: idealWindowWidth
         )
+        // Keep the title and draft headers at the top when code settings
+        // increase the form's natural height.
+        .frame(maxHeight: .infinity, alignment: .top)
         .allowsHitTesting(!isOverlayVisible)
     }
 
@@ -839,7 +842,8 @@ struct ContentView: View {
 
     private func draftStatus(for text: String) -> String {
         guard codeMode else { return "\(wordCount(of: text)) words" }
-        return "\(CodeInputCore.lineCount(in: text)) lines · \(text.count) characters"
+        let lines = max(1, CodeInputCore.lineCount(in: text))
+        return "\(lines) \(lines == 1 ? "line" : "lines") · \(text.count) characters"
     }
 
     @ViewBuilder
@@ -955,9 +959,11 @@ struct ContentView: View {
             // button visible if the additional settings exceed window height.
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 12) {
-                    cleanUpCard
-                        .disabled(codeMode)
-                        .opacity(codeMode ? 0.55 : 1.0)
+                    if codeMode {
+                        codeFormattingNotice
+                    } else {
+                        cleanUpCard
+                    }
                     typingSpeedCard
                 }
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -1010,6 +1016,33 @@ struct ContentView: View {
                 replaceEmDashesWithCommas = newValue
             }
         )
+    }
+
+    private var codeFormattingNotice: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "curlybraces")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Source formatting preserved")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+
+                Text("Clean-Up is disabled in Code Mode to preserve indentation, whitespace, and code structure.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+        )
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder
