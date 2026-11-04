@@ -27,10 +27,13 @@ final class CodeEditorUITests: XCTestCase {
     }
 
     @discardableResult
-    private func launch(_ fixture: String) -> XCUIApplication {
+    private func launch(_ fixture: String, appearance: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments += ["--wmt-ui-tests"]
         app.launchEnvironment["WMT_UI_FIXTURE"] = fixture
+        if let appearance {
+            app.launchEnvironment["WMT_UI_APPEARANCE"] = appearance
+        }
         app.launch()
         runningApp = app
 
@@ -120,6 +123,19 @@ final class CodeEditorUITests: XCTestCase {
         XCTAssertTrue(
             app.descendants(matching: .any)
                 .matching(identifier: "codeFormattingNotice").firstMatch.exists
+        )
+    }
+
+    func testDarkModePythonRendering() {
+        let app = launch("python", appearance: "dark")
+        let draft = editor(1, in: app)
+        XCTAssertTrue(draft.isHittable)
+        XCTAssertTrue((draft.value as? String ?? "").contains("def greet(name: str)"))
+        XCTAssertTrue(app.staticTexts["pythonBadge"].exists)
+        XCTAssertGreaterThan(
+            paintedTextSampleCount(draft),
+            80,
+            "Dark Mode source is in accessibility but its glyphs are invisible."
         )
     }
 
