@@ -34,89 +34,103 @@ enum CodeEditorAppearance {
     }
 }
 
-/// A native gutter aligned with the editor's scroll position and text layout.
-/// Shows logical (not wrapped-visual) line numbers.
-final class PythonLineNumberRulerView: NSRulerView {
-    static let gutterWidth: CGFloat = 42
-    weak var editor: NSTextView?
+/// NSTextView-hosted gutter for Code Mode.
+///
+/// A separate NSRulerView can make SwiftUI's zero-width layout passes leave the
+/// document view displaced, with line numbers visible but code and caret blank.
+/// Reserve space inside NSTextView instead, so glyphs, insertion point, and
+/// line numbers share the same coordinate system and scroll together.
+final class CodeDraftTextView: NSTextView {
+    static let codeGutterWidth: CGFloat = 42
+    static let standardLinePadding: CGFloat = 5
 
-    init(scrollView: NSScrollView, editor: NSTextView) {
-        self.editor = editor
-        super.init(scrollView: scrollView, orientation: .verticalRuler)
-        clientView = editor
-        ruleThickness = Self.gutterWidth
+    var onFocusChange: ((Bool) -> Void)?
+    var showsCodeLineNumbers: Bool = false {
+        didSet {
+            if oldValue != showsCodeLineNumbers { needsDisplay = true }
+        }
     }
 
-    required init(coder: NSCoder) {
-        super.init(coder: coder)
+    override func becomeFirstResponder() -> Bool {
+        let result = super.becomeFirstResponder()
+        if result { onFocusChange?(true) }
+        return result
     }
 
-    override func drawHashMarksAndLabels(in rect: NSRect) {
-        guard let editor,
-              let manager = editor.layoutManager,
-              let container = editor.textContainer else { return }
+    override func resignFirstResponder() -> Bool {
+        let result = super.resignFirstResponder()
+        if result { onFocusChange?(false) }
+        return result
+    }
 
-        NSColor.controlBackgroundColor.setFill()
-        NSBezierPath(rect: rect).fill()
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        if showsCodeLineNumbers {
+            drawLineNumbers(in: dirtyRect)
+        }
+    }
 
-        // The extra line fragment is used for an empty buffer or a trailing
-        // line break; layout must exist before requesting its geometry.
+    private func drawLineNumbers(in dirtyRect: NSRect) {
+        guard let manager = layoutManager, let container = textContainer else { return }
         manager.ensureLayout(for: container)
 
-        let source = editor.string as NSString
-        let size = source.length
-        let textRect = editor.visibleRect
+        let source = string as NSString
+        let length = source.length
+        let origin = textContainerOrigin
+        let visible = visibleRect
         let glyphRect = NSRect(
-            x: textRect.minX - editor.textContainerOrigin.x,
-            y: textRect.minY - editor.textContainerOrigin.y,
-            width: textRect.width,
-            height: textRect.height
+            x: visible.minX - origin.x,
+            y: visible.minY - origin.y,
+            width: visible.width,
+            height: visible.height
         )
-        let visibleGlyphs = manager.glyphRange(forBoundingRect: glyphRect, in: container)
-        let visibleCharacters = manager.characterRange(forGlyphRange: visibleGlyphs, actualGlyphRange: nil)
-
-        let initial = min(visibleCharacters.location, size)
-        var index = source.lineRange(for: NSRange(location: initial, length: 0)).location
-        // Use the shared line-ending policy so CRLF counts as one line.
-        let prefix = source.substring(to: index)
-        var lineNumber = max(1, CodeInputCore.lineCount(in: prefix))
+        let glyphRange = manager.glyphRange(forBoundingRect: glyphRect, in: container)
+        let characters = manager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        let first = min(characters.location, length)
+        var index = source.lineRange(for: NSRange(location: first, length: 0)).location
+        var number = max(1, CodeInputCore.lineCount(in: source.substring(to: index)))
 
         let style: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular),
             .foregroundColor: NSColor.secondaryLabelColor
         ]
-        let end = min(size, NSMaxRange(visibleCharacters) + 1)
-        let lastUnit = size > 0 ? source.character(at: size - 1) : 0
-        let endsWithLineBreak = lastUnit == 10 || lastUnit == 13
+        let end = min(length, NSMaxRange(characters) + 1)
+        let lastUnit = length > 0 ? source.character(at: length - 1) : 0
+        let hasTrailingLine = lastUnit == 10 || lastUnit == 13
 
         while index <= end {
-            // A caret at end-of-file is not another logical line unless the
-            // source ends with a line break. An empty document still has line 1.
-            if index == size && size > 0 && !endsWithLineBreak { break }
+            // The EOF caret belongs to the last nonempty line unless a newline
+            // created an actual trailing empty line.
+            if index == length && length > 0 && !hasTrailingLine { break }
 
             let y: CGFloat
-            if size == 0 || index == size {
+            if length == 0 || index == length {
                 let extra = manager.extraLineFragmentRect
-                let origin = NSPoint(
-                    x: 0,
-                    y: extra.minY + editor.textContainerOrigin.y
-                )
-                y = editor.convert(origin, to: self).y
+                y = (extra.height > 0 ? extra.minY : 0) + origin.y
             } else {
-                let glyph = manager.glyphIndexForCharacter(at: index)
-                let fragment = manager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
-                let origin = NSPoint(x: 0, y: fragment.minY + editor.textContainerOrigin.y)
-                y = editor.convert(origin, to: self).y
+                let glyphIndex = manager.glyphIndexForCharacter(at: index)
+                let fragment = manager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil)
+                y = fragment.minY + origin.y
             }
-            let label = NSString(string: String(lineNumber))
-            let width = label.size(withAttributes: style).width
-            label.draw(at: NSPoint(x: max(3, ruleThickness - width - 9), y: y), withAttributes: style)
 
-            if index >= size { break }
+            let label = NSString(string: String(number))
+            let size = label.size(withAttributes: style)
+            if y + size.height >= visible.minY && y <= visible.maxY
+                && y + size.height >= dirtyRect.minY && y <= dirtyRect.maxY {
+                label.draw(
+                    at: NSPoint(
+                        x: max(2, origin.x + container.lineFragmentPadding - size.width - 8),
+                        y: y
+                    ),
+                    withAttributes: style
+                )
+            }
+
+            if index >= length { break }
             let next = NSMaxRange(source.lineRange(for: NSRange(location: index, length: 0)))
             guard next > index else { break }
             index = next
-            lineNumber += 1
+            number += 1
         }
     }
 }
