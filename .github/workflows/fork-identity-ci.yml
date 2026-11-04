@@ -8,7 +8,6 @@ on:
   pull_request:
     branches:
       - main
-      - feature/code-mode  # integration review into the active feature branch
   workflow_dispatch:
 
 permissions:
