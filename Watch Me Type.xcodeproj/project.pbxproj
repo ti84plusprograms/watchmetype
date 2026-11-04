@@ -305,7 +305,7 @@
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Watch-Me-Type-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Watch Me Type";
+				INFOPLIST_KEY_CFBundleDisplayName = "Watch Me Type Dev";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -314,7 +314,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				MARKETING_VERSION = 3.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.ti84plusprograms.watchmetype";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ti84plusprograms.watchmetype.dev";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
@@ -362,7 +362,7 @@
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Watch-Me-Type-Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Watch Me Type";
+				INFOPLIST_KEY_CFBundleDisplayName = "Watch Me Type Fork";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
