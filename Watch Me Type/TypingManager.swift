@@ -113,6 +113,7 @@ final class TypingManager: NSObject, ObservableObject {
     private var typingWorkItem: DispatchWorkItem?
     // Cancel the deferred Return if typing stops, pauses, or restarts.
     private var pendingCodeNewlineWorkItem: DispatchWorkItem?
+    private var pendingCodeNewlineIndex: Int?
     // Synthetic Escape must not trigger Watch Me Type's global Escape-to-pause shortcut.
     private static let syntheticDismissalEscapeTag: Int64 = 0x574D545F455343
     
@@ -206,6 +207,7 @@ final class TypingManager: NSObject, ObservableObject {
         typingWorkItem?.cancel()
         pendingCodeNewlineWorkItem?.cancel()
         pendingCodeNewlineWorkItem = nil
+        pendingCodeNewlineIndex = nil
 
         textToType = Array(text)
         currentIndex = 0
@@ -300,6 +302,7 @@ final class TypingManager: NSObject, ObservableObject {
         typingWorkItem = nil
         pendingCodeNewlineWorkItem?.cancel()
         pendingCodeNewlineWorkItem = nil
+        pendingCodeNewlineIndex = nil
 
         // Cancel edit character typing work item
         editCharWorkItem?.cancel()
@@ -580,8 +583,16 @@ final class TypingManager: NSObject, ObservableObject {
 
         typingWorkItem?.cancel()
         typingWorkItem = nil
+        // If Escape was sent but Return has not yet been posted, retry the
+        // pending source newline after resume rather than silently skip it.
+        if let pendingIndex = pendingCodeNewlineIndex {
+            currentIndex = pendingIndex
+            previousCharacter = pendingIndex > 0 ? textToType[pendingIndex - 1] : nil
+            progressFraction = Double(currentIndex) / Double(max(1, textToType.count))
+        }
         pendingCodeNewlineWorkItem?.cancel()
         pendingCodeNewlineWorkItem = nil
+        pendingCodeNewlineIndex = nil
 
         stopPeriodicFocusCheck()
 
@@ -980,13 +991,15 @@ final class TypingManager: NSObject, ObservableObject {
         keyUp.post(tap: .cghidEventTap)
 
         pendingCodeNewlineWorkItem?.cancel()
+        pendingCodeNewlineIndex = max(0, currentIndex - 1)
         let workItem = DispatchWorkItem { [weak self] in
             guard let self = self, self.state == .typing else { return }
-            self.pendingCodeNewlineWorkItem = nil
             guard self.isTargetWindowFocused() else {
                 self.pauseTyping()
                 return
             }
+            self.pendingCodeNewlineWorkItem = nil
+            self.pendingCodeNewlineIndex = nil
             self.sendReturnKey()
         }
         pendingCodeNewlineWorkItem = workItem
