@@ -288,6 +288,7 @@ struct ContentView: View {
     @State private var showDraft2: Bool = false
     @State private var inputTextDraft2: String = ""
     @State private var showDraft3: Bool = false
+    @State private var editExistingDocument: Bool = false
     @State private var inputTextDraft3: String = ""
     @State private var customEditingDuration: Bool = false
     @State private var editingDurationValue: String = ""
@@ -388,6 +389,12 @@ struct ContentView: View {
         .onChange(of: showDraft3) { _, _ in
             adjustWindowForDraftCountChange()
         }
+        .onChange(of: editExistingDocument) { _, editing in
+            if editing {
+                showDraft2 = true
+                showDraft3 = false
+            }
+        }
         .onChange(of: isOverlayVisible) { _, newValue in
             // When the overlay disappears entirely, ensure window level returns to normal.
             // Note: Window frame restoration is handled by the "Let's go again" button.
@@ -434,7 +441,15 @@ struct ContentView: View {
         }
         .alert("Ready to type?", isPresented: $showStartConfirmation) {
             Button("Start") {
-                if hasSecondDraft {
+                if editExistingDocument {
+                    typingManager.startEditingExistingDocument(
+                        currentText: inputText,
+                        targetText: inputTextDraft2,
+                        wpm: Int(targetWPM),
+                        countdown: 10,
+                        editingDuration: editingDurationSeconds
+                    )
+                } else if hasSecondDraft {
                     typingManager.startTwoPhaseTyping(
                         draft1: inputText,
                         draft2: inputTextDraft2,
@@ -458,7 +473,9 @@ struct ContentView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("You'll have 10 seconds to switch to your target window.\n\n⚠️ Make sure auto-correct is turned off in the destination document before continuing.")
+            Text(editExistingDocument
+                ? "You have 10 seconds to open your existing document and click inside its editable text. This mode SKIPS document-text verification, moves the cursor to the end (Cmd+Down), then edits directly. Work on a duplicate first. Turn off autocorrect."
+                : "You'll have 10 seconds to switch to your target window.\n\n⚠️ Make sure auto-correct is turned off in the destination document before continuing.")
         }
         .alert("Editing Error", isPresented: $showEditingError) {
             Button("OK", role: .cancel) {
@@ -546,14 +563,14 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             EqualWidthHStack(spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Draft 1")
+                    Text(editExistingDocument ? "Current Document" : "Draft 1")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
 
                     draftEditorView(
                         title: "Draft 1",
                         text: $inputText,
-                        placeholder: "Paste your initial draft here.",
+                        placeholder: editExistingDocument ? "Paste an exact copy of the existing document." : "Paste your initial draft here.",
                         editorAccessibilityLabel: "Draft 1 text editor",
                         isFocused: $isDraft1EditorFocused,
                         showsTitle: false,
@@ -562,8 +579,14 @@ struct ContentView: View {
                     )
 
                     HStack(alignment: .center, spacing: 8) {
-                        Toggle("I have a draft 2.", isOn: $showDraft2)
-                            .font(.caption)
+                        if editExistingDocument {
+                            Text("Starting text in the existing document")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Toggle("I have a draft 2.", isOn: $showDraft2)
+                                .font(.caption)
+                        }
                         Spacer()
                         Text("\(wordCount(of: inputText)) words")
                             .font(.caption)
@@ -574,7 +597,7 @@ struct ContentView: View {
 
                 if showDraft2 {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Draft 2")
+                        Text(editExistingDocument ? "Target Document" : "Draft 2")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
 
@@ -585,7 +608,7 @@ struct ContentView: View {
                                 draftEditorView(
                                     title: "Draft 2",
                                     text: $inputTextDraft2,
-                                    placeholder: "Paste your final draft here.",
+                                    placeholder: editExistingDocument ? "Paste the desired final text here." : "Paste your final draft here.",
                                     editorAccessibilityLabel: "Draft 2 text editor",
                                     isFocused: $isDraft2EditorFocused,
                                     showsTitle: false,
@@ -595,8 +618,10 @@ struct ContentView: View {
                         )
 
                         HStack(alignment: .center, spacing: 8) {
-                            Toggle("I have a draft 3.", isOn: $showDraft3)
-                                .font(.caption)
+                            if !editExistingDocument {
+                                Toggle("I have a draft 3.", isOn: $showDraft3)
+                                    .font(.caption)
+                            }
                             Spacer()
                             Text("\(wordCount(of: inputTextDraft2)) words")
                                 .font(.caption)
@@ -606,7 +631,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
 
-                if showDraft2 && showDraft3 {
+                if showDraft2 && showDraft3 && !editExistingDocument {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Draft 3")
                             .font(.subheadline)
@@ -756,6 +781,14 @@ struct ContentView: View {
             Spacer()
                 .frame(height: 16)
 
+            Toggle("Edit Existing Document", isOn: $editExistingDocument)
+                .font(.headline)
+            if editExistingDocument {
+                Text("Paste the exact existing text and the target version above. Back up the document first. This mode skips clipboard checks and edits directly; the starting text and cursor position must be correct.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
             humanizeButton
                 // Extra horizontal space so glow shadow isn't clipped by parent
                 .padding(.horizontal, 4)
@@ -766,8 +799,8 @@ struct ContentView: View {
             Spacer(minLength: 0)
 
             VStack(spacing: 6) {
-                if !hasFirstDraft {
-                    Text("Paste text in Draft 1 to start")
+                if !hasFirstDraft || (editExistingDocument && !hasSecondDraft) {
+                    Text(editExistingDocument ? "Enter current and target text to start" : "Paste text in Draft 1 to start")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -775,18 +808,18 @@ struct ContentView: View {
                 Button {
                     showStartConfirmation = true
                 } label: {
-                    Text("Start")
+                    Text(editExistingDocument ? "Start Editing" : "Start")
                         .font(.title3)
                         .bold()
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                 }
-                .buttonStyle(StartButtonStyle(isEnabled: hasFirstDraft))
+                .buttonStyle(StartButtonStyle(isEnabled: hasFirstDraft && (!editExistingDocument || hasSecondDraft)))
                 .keyboardShortcut(.return, modifiers: .command)
-                .disabled(!hasFirstDraft)
-                .accessibilityHint(!hasFirstDraft
-                    ? "Paste text in Draft 1 to enable"
-                    : "Starts typing simulation with a 10-second countdown")
+                .disabled(!hasFirstDraft || (editExistingDocument && !hasSecondDraft))
+                .accessibilityHint(!hasFirstDraft || (editExistingDocument && !hasSecondDraft)
+                    ? "Enter both current and target text to enable editing"
+                    : "Starts a run with a 10-second countdown")
             }
         }
         .frame(width: 320, alignment: .topLeading)
@@ -1293,6 +1326,7 @@ struct ContentView: View {
     ) -> some View {
         let showProgressSection = typingManager.state == .typing
             || typingManager.state == .paused
+            || typingManager.state == .editing
 
         VStack(spacing: 10) {
             if let instruction = overlayPrimaryInstruction {
@@ -1328,6 +1362,16 @@ struct ContentView: View {
                 .font(.system(size: statusFontSize, weight: .bold, design: .rounded))
                 .foregroundColor(primaryText)
                 .accessibilityLabel("Status: \(statusText)")
+
+            if typingManager.state == .editing {
+                Text(typingManager.progressText)
+                    .font(.caption2)
+                    .foregroundColor(secondaryText)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(5)
+                    .frame(maxWidth: 280)
+                    .accessibilityLabel(typingManager.progressText)
+            }
 
             Spacer()
                 .frame(height: 16)
