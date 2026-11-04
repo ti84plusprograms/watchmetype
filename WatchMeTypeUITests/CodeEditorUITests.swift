@@ -71,7 +71,10 @@ final class CodeEditorUITests: XCTestCase {
         XCTAssertTrue(value.contains("return f\"Hello, {name}!\""))
         XCTAssertTrue(app.staticTexts["pythonBadge"].exists)
         XCTAssertTrue(app.staticTexts["draftHeading-Draft 1"].exists)
-        XCTAssertTrue(app.staticTexts["Source formatting preserved"].exists)
+        XCTAssertTrue(
+            app.descendants(matching: .any)
+                .matching(identifier: "codeFormattingNotice").firstMatch.exists
+        )
     }
 
     func testLongLineWrapping() {
