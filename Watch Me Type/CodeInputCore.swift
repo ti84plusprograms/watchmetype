@@ -100,8 +100,14 @@ enum CodeInputCore {
 
     /// Give editors time to process structural keys; WPM remains the base
     /// speed, but bursty punctuation/newlines are deliberately slower.
+    static let suggestionDismissalDelay: TimeInterval = 0.05
+
     static func minimumDelay(after character: Character) -> TimeInterval {
-        if character == "\n" || character == "\r" || character == "\t" {
+        if character == "\n" || character == "\r" {
+            // Leave time for Escape -> Return and the editor's input queue.
+            return 0.25
+        }
+        if character == "\t" {
             return 0.12
         }
         if "()[]{}\"'".contains(character) { return 0.06 }
