@@ -15,6 +15,10 @@ enum UIRegressionFixture {
         isRunning && name != "normal"
     }
 
+    static var forceDarkAppearance: Bool {
+        isRunning && ProcessInfo.processInfo.environment["WMT_UI_APPEARANCE"] == "dark"
+    }
+
     static var showDraft2: Bool {
         isRunning && (name == "two-drafts" || name == "three-drafts")
     }
