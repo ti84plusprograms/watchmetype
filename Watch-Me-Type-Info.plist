@@ -3,12 +3,10 @@
 <plist version="1.0">
 <dict>
 	<key>SUEnableAutomaticChecks</key>
-	<true/>
+	<false/>
 	<key>SUEnableInstallerLauncherService</key>
 	<true/>
 	<key>SUFeedURL</key>
-	<string>https://0xff-r4bbit.github.io/watchmetype/appcast.xml</string>
-	<key>SUPublicEDKey</key>
-	<string>6/h2Pfjbo39vHie8JIt/kY7h0wQvmQxj9Ea0W3gnH0w=</string>
+	<string>https://ti84plusprograms.github.io/watchmetype/appcast.xml</string>
 </dict>
 </plist>

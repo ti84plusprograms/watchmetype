@@ -95,11 +95,11 @@ Tests under `Watch Me TypeTests/` cover `EditOperationConverter` (tokenisation, 
 
 ## Installation
 
-1. Download [the latest DMG](https://github.com/0xff-r4bbit/watchmetype/releases/latest/download/WatchMeType.dmg).
+1. Download [the latest fork DMG](https://github.com/ti84plusprograms/watchmetype/releases/latest/download/WatchMeType.dmg) once a fork release is published. No fork release is published yet; until then, build from source below.
 2. Drag **Watch Me Type** into the **Applications** folder.
 3. Launch the app.
 4. In the in-app prompt, choose **Continue** and grant Accessibility access in System Settings when prompted.
-5. Sparkle will check for updates automatically after launch; manual "Check for Updates" is in the menu.
+5. Automatic Sparkle updates are currently OFF in this fork (see Watch-Me-Type-Info.plist) so a fork build cannot be overwritten by an upstream release. Re-enable them only after you have generated your own Sparkle signing key and published a signed fork release.
 
 ## Usage notes
 
