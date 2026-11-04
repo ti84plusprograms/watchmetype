@@ -95,11 +95,21 @@ Tests under `Watch Me TypeTests/` cover `EditOperationConverter` (tokenisation, 
 
 ## Installation
 
-1. Download [the latest DMG](https://github.com/0xff-r4bbit/watchmetype/releases/latest/download/WatchMeType.dmg).
-2. Drag **Watch Me Type** into the **Applications** folder.
-3. Launch the app.
-4. In the in-app prompt, choose **Continue** and grant Accessibility access in System Settings when prompted.
-5. Sparkle will check for updates automatically after launch; manual "Check for Updates" is in the menu.
+1. **No fork DMG is currently published.** Compile this fork locally from source using the Xcode project below. Do not use the upstream DMG as a substitute for the fork.
+2. Choose your own signing team under Xcode **Signing & Capabilities** if required, then Build/Run.
+3. Debug builds use **Watch Me Type Dev** (`com.ti84plusprograms.watchmetype.dev`); Release builds use **Watch Me Type Fork** (`com.ti84plusprograms.watchmetype`). Both are distinct from the original upstream app, and from each other.
+4. Grant **Accessibility** permission separately to the exact executable you run: **System Settings > Privacy & Security > Accessibility**. Previously granted permissions for upstream or a different build do not automatically apply.
+5. **All in-app Sparkle update functionality is disabled** in this fork: automatic checks in the plist, updater startup, and the manual Check for Updates menu. The fork feed is intentionally empty. Do not turn update functionality back on until a signed and authorized fork release is ready.
+
+### Fork signing and future update setup
+
+This is a **pre-release checklist only**; no signing key or release is created by this branch.
+
+- Obtain the upstream copyright holder's **written redistribution permission** before publishing modified source or binaries. The current `LICENCE.md` restricts redistribution, even for a non-commercial fork.
+- On a trusted Mac, run Sparkle's bundled `generate_keys` once; the private Ed25519 key is stored in the login Keychain by default. Save the printed **public** key as `SUPublicEDKey` in `Watch-Me-Type-Info.plist`.
+- The existing `scripts/sign-update.sh` expects a private key **file**, not the default Keychain location. If you choose this script, use `generate_keys -x /path/to/private-key-file` to export the Keychain key into a secured local file and set `SPARKLE_KEY` to that location; otherwise sign directly using the Keychain-aware Sparkle tooling. Never commit, distribute, or upload private-key material. Run `generate_keys -h` to confirm syntax for your installed Sparkle version.
+- Sign/notarize a fork-owned release, sign its update archive with the fork key, publish and verify `docs/appcast.xml` on the fork's Pages domain, and only then restore Sparkle startup/menus and consider enabling automatic checks. Do not copy upstream signatures or keys.
+- The `fork-identity-ci.yml` workflow tests the unsigned app's identity and disabled-update configuration. It cannot verify a locally signed, notarized release or actual macOS Accessibility behavior.
 
 ## Usage notes
 
