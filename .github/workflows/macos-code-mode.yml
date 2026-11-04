@@ -105,7 +105,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-ui-test:
+  ui-test:
     name: Capture macOS Code Mode UI screenshots
     needs: verify
     runs-on: macos-15
