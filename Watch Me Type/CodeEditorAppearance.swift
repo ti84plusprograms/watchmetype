@@ -37,13 +37,14 @@ enum CodeEditorAppearance {
 /// A native gutter aligned with the editor's scroll position and text layout.
 /// Shows logical (not wrapped-visual) line numbers.
 final class PythonLineNumberRulerView: NSRulerView {
+    static let gutterWidth: CGFloat = 42
     weak var editor: NSTextView?
 
     init(scrollView: NSScrollView, editor: NSTextView) {
         self.editor = editor
         super.init(scrollView: scrollView, orientation: .verticalRuler)
         clientView = editor
-        ruleThickness = 42
+        ruleThickness = Self.gutterWidth
     }
 
     required init(coder: NSCoder) {
@@ -57,6 +58,10 @@ final class PythonLineNumberRulerView: NSRulerView {
 
         NSColor.controlBackgroundColor.setFill()
         NSBezierPath(rect: rect).fill()
+
+        // The extra line fragment is used for an empty buffer or a trailing
+        // line break; layout must exist before requesting its geometry.
+        manager.ensureLayout(for: container)
 
         let source = editor.string as NSString
         let size = source.length
@@ -81,12 +86,22 @@ final class PythonLineNumberRulerView: NSRulerView {
             .foregroundColor: NSColor.secondaryLabelColor
         ]
         let end = min(size, NSMaxRange(visibleCharacters) + 1)
+        let lastUnit = size > 0 ? source.character(at: size - 1) : 0
+        let endsWithLineBreak = lastUnit == 10 || lastUnit == 13
+
         while index <= end {
+            // A caret at end-of-file is not another logical line unless the
+            // source ends with a line break. An empty document still has line 1.
+            if index == size && size > 0 && !endsWithLineBreak { break }
+
             let y: CGFloat
             if size == 0 || index == size {
-                // Empty buffer or trailing newline: use an estimated caret line.
-                let caret = editor.firstRect(forCharacterRange: NSRange(location: index, length: 0), actualRange: nil)
-                y = convert(editor.window?.convertFromScreen(caret).origin ?? .zero, from: nil).y
+                let extra = manager.extraLineFragmentRect
+                let origin = NSPoint(
+                    x: 0,
+                    y: extra.minY + editor.textContainerOrigin.y
+                )
+                y = editor.convert(origin, to: self).y
             } else {
                 let glyph = manager.glyphIndexForCharacter(at: index)
                 let fragment = manager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
