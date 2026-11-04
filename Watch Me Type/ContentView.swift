@@ -13,6 +13,7 @@ private class FixedIntrinsicScrollView: NSScrollView {
 struct NativeTextEditor: NSViewRepresentable {
     @Binding var text: String
     var accessibilityLabel: String = "Text editor"
+    var accessibilityIdentifier: String = "draftEditor"
     var isFocused: Binding<Bool>? = nil
     var focusOnAppear: Bool = false
     var isCodeMode: Bool = false
@@ -55,6 +56,7 @@ struct NativeTextEditor: NSViewRepresentable {
         textView.textContainer?.heightTracksTextView = false
         textView.delegate = context.coordinator
         textView.setAccessibilityLabel(accessibilityLabel)
+        textView.setAccessibilityIdentifier(accessibilityIdentifier)
 
         let coordinator = context.coordinator
         textView.onFocusChange = { [weak coordinator] focused in
@@ -263,6 +265,15 @@ private struct DraftEditor: View {
     let placeholder: LocalizedStringKey
     let editorAccessibilityLabel: String
     @Binding var isFocused: Bool
+
+    private var editorIdentifier: String {
+        switch title {
+        case "Draft 1": "draft1Editor"
+        case "Draft 2": "draft2Editor"
+        case "Draft 3": "draft3Editor"
+        default: "draftEditor"
+        }
+    }
     var showsTitle: Bool = true
     var cornerStyle: DraftEditorCornerStyle = .full
     var focusOnAppear: Bool = false
@@ -286,6 +297,7 @@ private struct DraftEditor: View {
             NativeTextEditor(
                 text: $text,
                 accessibilityLabel: editorAccessibilityLabel,
+                accessibilityIdentifier: editorIdentifier,
                 isFocused: $isFocused,
                 focusOnAppear: focusOnAppear,
                 isCodeMode: isCodeMode
@@ -363,12 +375,12 @@ enum TypingSpeedPolicy {
 }
 
 struct ContentView: View {
-    @State private var inputText: String = ""
+    @State private var inputText: String = UIRegressionFixture.draft1
     @State private var targetWPM: Double = 80
-    @State private var codeMode: Bool = false
+    @State private var codeMode: Bool = UIRegressionFixture.codeMode
     @State private var codeInputStrategy: CodeInputStrategy = .simulated
-    @State private var includeThinkingPauses: Bool = true
-    @State private var simulateMistakes: Bool = true
+    @State private var includeThinkingPauses: Bool = !UIRegressionFixture.codeMode
+    @State private var simulateMistakes: Bool = !UIRegressionFixture.codeMode
     @State private var prosePreferences = TypingPreferences(thinking: true, mistakes: true)
     @State private var codePreferences = TypingPreferences(thinking: false, mistakes: false)
 
@@ -444,10 +456,10 @@ struct ContentView: View {
     @State private var durationUnit: DurationUnit = .minutes
 
     // Two-draft editing mode
-    @State private var showDraft2: Bool = false
-    @State private var inputTextDraft2: String = ""
-    @State private var showDraft3: Bool = false
-    @State private var inputTextDraft3: String = ""
+    @State private var showDraft2: Bool = UIRegressionFixture.showDraft2
+    @State private var inputTextDraft2: String = UIRegressionFixture.draft2
+    @State private var showDraft3: Bool = UIRegressionFixture.showDraft3
+    @State private var inputTextDraft3: String = UIRegressionFixture.draft3
     @State private var customEditingDuration: Bool = false
     @State private var editingDurationValue: String = ""
     @State private var editingDurationUnit: DurationUnit = .minutes
@@ -614,6 +626,7 @@ struct ContentView: View {
         }
         .alert("Ready to type?", isPresented: $showStartConfirmation) {
             Button("Start") {
+                guard !UIRegressionFixture.isRunning else { return }
                 if hasSecondDraft {
                     typingManager.startTwoPhaseTyping(
                         draft1: inputText,
@@ -682,6 +695,7 @@ struct ContentView: View {
                     Text("Watch Me Type")
                         .font(.title)
                         .bold()
+                        .accessibilityIdentifier("mainHeading")
 
                     Button {
                         showHowItWorksSheet = true
@@ -840,6 +854,7 @@ struct ContentView: View {
             Text(name)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
+                .accessibilityIdentifier("draftHeading-" + name)
             if codeMode {
                 Text("PYTHON")
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
@@ -848,6 +863,7 @@ struct ContentView: View {
                     .padding(.vertical, 2)
                     .background(Capsule().fill(Color.blue.opacity(0.10)))
                     .accessibilityLabel("Python code editor active")
+                    .accessibilityIdentifier("pythonBadge")
             }
         }
     }
@@ -990,6 +1006,7 @@ struct ContentView: View {
                 }
 
                 Button {
+                    guard !UIRegressionFixture.isRunning else { return }
                     guard AccessibilityPermissionHelper.isTrusted else {
                         showTypingAccessibilityRequiredAlert()
                         return
@@ -1002,9 +1019,9 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                 }
-                .buttonStyle(StartButtonStyle(isEnabled: hasFirstDraft))
+                .buttonStyle(StartButtonStyle(isEnabled: hasFirstDraft && !UIRegressionFixture.isRunning))
                 .keyboardShortcut(.return, modifiers: .command)
-                .disabled(!hasFirstDraft)
+                .disabled(!hasFirstDraft || UIRegressionFixture.isRunning)
                 .accessibilityHint(!hasFirstDraft
                     ? "Paste text in Draft 1 to enable"
                     : "Starts typing simulation with a 10-second countdown")
@@ -1149,6 +1166,7 @@ struct ContentView: View {
                 }
 
                 Toggle("Code Mode", isOn: codeModeBinding)
+                    .accessibilityIdentifier("codeModeToggle")
                     .font(.subheadline)
                     .help("Preserve source whitespace; choose between simulated keystrokes and exact insertion.")
 
@@ -1989,6 +2007,18 @@ struct ContentView: View {
     }
 
     private func handleAccessibilityOnAppear() {
+        if UIRegressionFixture.isRunning {
+            // UI tests must never request Accessibility permission or inject
+            // input into other processes. Set deterministic dimensions only.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                setWindowToDefaultSize()
+                if visibleDraftCount > 1 {
+                    adjustWindowForDraftCountChange()
+                }
+            }
+            return
+        }
+
         // Only run this once per launch so we don't nag if the view reloads.
         guard !hasShownAccessibilityAlert else { return }
         hasShownAccessibilityAlert = true
