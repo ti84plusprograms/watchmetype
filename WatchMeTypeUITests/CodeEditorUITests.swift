@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 
 /// End-to-end AppKit/SwiftUI layout smoke tests. Every test captures the real
 /// macOS window as an xcresult screenshot attachment, including on failures.
@@ -41,6 +42,46 @@ final class CodeEditorUITests: XCTestCase {
         return app
     }
 
+    /// Baseline-free render smoke check: sample pixels away from the gutter and
+    /// focus border. If the editor's text is present in accessibility but all
+    /// glyphs are invisible, this region is almost entirely the background.
+    /// This is deliberately coarse; screenshot attachments remain authoritative.
+    private func paintedTextSampleCount(_ editor: XCUIElement) -> Int {
+        let image = editor.screenshot().image
+        guard let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              bitmap.pixelsWide > 180, bitmap.pixelsHigh > 80,
+              let sample = bitmap.colorAt(
+                x: bitmap.pixelsWide * 9 / 10,
+                y: bitmap.pixelsHigh * 4 / 5
+              )?.usingColorSpace(.deviceRGB) else { return 0 }
+
+        let width = bitmap.pixelsWide
+        let height = bitmap.pixelsHigh
+        let firstX = width / 7
+        let lastX = width * 3 / 4
+        let firstY = max(12, height / 50)
+        let lastY = min(height / 2, 220)
+        var contrastCount = 0
+
+        for y in stride(from: firstY, to: lastY, by: 2) {
+            for x in stride(from: firstX, to: lastX, by: 2) {
+                guard let color = bitmap.colorAt(x: x, y: y)?
+                    .usingColorSpace(.deviceRGB) else { continue }
+                let contrast = max(
+                    abs(color.redComponent - sample.redComponent),
+                    max(
+                        abs(color.greenComponent - sample.greenComponent),
+                        abs(color.blueComponent - sample.blueComponent)
+                    )
+                )
+                if contrast > 0.28 { contrastCount += 1 }
+            }
+        }
+
+        return contrastCount
+    }
+
     private func editor(_ number: Int, in app: XCUIApplication) -> XCUIElement {
         let element = app.textViews["draft\(number)Editor"]
         XCTAssertTrue(element.waitForExistence(timeout: 10), "Draft \(number) NSTextView missing")
@@ -69,6 +110,11 @@ final class CodeEditorUITests: XCTestCase {
         let value = draft.value as? String ?? ""
         XCTAssertTrue(value.contains("def greet(name: str)"))
         XCTAssertTrue(value.contains("return f\"Hello, {name}!\""))
+        XCTAssertGreaterThan(
+            paintedTextSampleCount(draft),
+            80,
+            "Editor text is in accessibility but no contrasting glyph pixels were found."
+        )
         XCTAssertTrue(app.staticTexts["pythonBadge"].exists)
         XCTAssertTrue(app.staticTexts["draftHeading-Draft 1"].exists)
         XCTAssertTrue(
