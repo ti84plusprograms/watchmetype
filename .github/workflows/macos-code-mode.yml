@@ -130,6 +130,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Keep the Dock from obscuring the bottom of captured windows.
+          defaults write com.apple.dock autohide -bool true
+          killall Dock || true
           mkdir -p ui-test-evidence
           xcodebuild \
             -project "Watch Me Type.xcodeproj" \
