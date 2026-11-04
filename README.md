@@ -194,10 +194,29 @@ local unlocked Mac or an authorized self-hosted macOS runner.
 
 **Code Input** uses an extra compact control inside the existing Typing Speed
 card. **Simulated** types characters individually (with a longer pause after
-newlines, tabs, and brackets to give editors time to process them); it may still
-be affected by an IDE's automatic indentation, brace completion, or formatting.
-For simulated typing, disable auto-indent, format-on-type, automatic bracket
-pairing, completion, and autocorrect in the destination editor.
+newlines, tabs, and brackets to give editors time to process them). In
+Code Mode, simulated newlines now follow a fixed sequence, in order:
+(1) for the initial typing pass only, a tagged synthetic Escape dismisses
+IDE completion so Return cannot accept a suggestion instead of creating
+a newline, with the Return deferred 0.05s and the per-newline pause
+raised to 0.25s so the Return lands before the next character; if typing
+pauses before that Return fires, the newline is retried on resume rather
+than skipped; (2) Return; (3) Cmd+Left to the start of the new line, so
+an IDE's auto-indent does not compound with the source text's own
+leading spaces (previously this produced a staircase indent in VS Code).
+The line-start reset also applies to Draft 2/3 revision newlines, but
+the Escape dismissal and pause retry do not — revisions use a separate
+scheduler and keep a synchronous Return plus the reset. Simulated typing
+still does not verify that the target actually inserted a newline, so a
+Return dropped while focus and state stay normal can still join lines;
+it also does not fix automatic bracket pairing, format-on-type, or
+Return accepting a suggestion during revisions. For simulated typing,
+still disable format-on-type, automatic bracket pairing, and autocorrect
+in the destination editor, and verify in the target IDE first — the
+automated tests do not send keystrokes to an external editor, so they
+cannot catch this class of failure. Disabling completion/auto-indent is
+no longer required for the two failure modes above, but it remains a
+useful fallback if a given IDE behaves differently.
 
 **Exact Insert** instead issues a single standard macOS Paste command with
 the complete source text. This avoids per-Return autoindent and per-character
@@ -224,6 +243,34 @@ At very high WPM some editors may drop synthetic key events: start with
 nested indentation, multiple blank lines, tabs, punctuation, and a trailing
 newline at 80 and 240 WPM. Then verify Draft 1 → 2 with a small replacement.
 Compare the final text literally, not just visually.
+
+**Manual external-IDE checks (required — no automated test covers these):**
+use a disposable file, never a real submission file, and compare the
+result literally (for example with `diff` against the source text).
+
+1. **Staircase / auto-indent check (VS Code, default auto-indent left
+on):** simulated-type a short Python function with nested indentation
+plus a dedented line after it into a new empty `.py` file. Every line's
+leading whitespace must match the source exactly, and the dedented line
+must return to column 0 — not accumulate indent from the previous line.
+2. **Completion-open newline check (VS Code, completion left on):**
+simulated-type independent lines that would normally trigger a
+completion popup (for example `import numpy as np` followed by
+`from submission import RandomForest, load_csv`) into a new empty
+`.py` file. The lines must stay on separate lines — no joined lines,
+and no accepted suggestion text inserted instead of a newline. Repeat
+the same check for a Draft 1 → 2 revision containing a newline, noting
+that revisions do not get the Escape dismissal, only the line-start
+reset.
+3. **Pause-during-newline check:** start a simulated Code Mode run,
+switch focus away just as a newline is due (or press Escape manually
+to pause), then switch back and resume. The pending newline must be
+delivered on resume, not skipped, and no character must be duplicated
+or lost.
+
+If any check fails in a given IDE, do not use simulated typing for
+that IDE yet; use Exact Insert with format-on-paste disabled instead,
+and record which IDE and which check failed.
 
 **If the countdown runs but no text appears:** first try a disposable
 plain-text TextEdit document, with the caret visibly inside the text area

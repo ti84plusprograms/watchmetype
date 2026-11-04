@@ -111,6 +111,11 @@ final class TypingManager: NSObject, ObservableObject {
     ]
     
     private var typingWorkItem: DispatchWorkItem?
+    // Cancel the deferred Return if typing stops, pauses, or restarts.
+    private var pendingCodeNewlineWorkItem: DispatchWorkItem?
+    private var pendingCodeNewlineIndex: Int?
+    // Synthetic Escape must not trigger Watch Me Type's global Escape-to-pause shortcut.
+    private static let syntheticDismissalEscapeTag: Int64 = 0x574D545F455343
     
     // Total-time related
     private var extraDelayPerSentenceEnd: TimeInterval = 0
@@ -200,6 +205,9 @@ final class TypingManager: NSObject, ObservableObject {
         restorePasteboardIfUnchanged()
         countdownTimer?.invalidate()
         typingWorkItem?.cancel()
+        pendingCodeNewlineWorkItem?.cancel()
+        pendingCodeNewlineWorkItem = nil
+        pendingCodeNewlineIndex = nil
 
         textToType = Array(text)
         currentIndex = 0
@@ -292,6 +300,9 @@ final class TypingManager: NSObject, ObservableObject {
 
         typingWorkItem?.cancel()
         typingWorkItem = nil
+        pendingCodeNewlineWorkItem?.cancel()
+        pendingCodeNewlineWorkItem = nil
+        pendingCodeNewlineIndex = nil
 
         // Cancel edit character typing work item
         editCharWorkItem?.cancel()
@@ -444,6 +455,15 @@ final class TypingManager: NSObject, ObservableObject {
         
         if currentIndex < textToType.count {
             scheduleNextCharacter(after: nextDelay)
+        } else if isCodeMode && (character == "\n" || character == "\r") {
+            // A code newline is sent after dismissing IDE suggestions.
+            // Wait for that event even when it is the final source character.
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self = self, self.state == .typing else { return }
+                self.finishTyping()
+            }
+            typingWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + nextDelay, execute: workItem)
         } else {
             finishTyping()
         }
@@ -563,6 +583,16 @@ final class TypingManager: NSObject, ObservableObject {
 
         typingWorkItem?.cancel()
         typingWorkItem = nil
+        // If Escape was sent but Return has not yet been posted, retry the
+        // pending source newline after resume rather than silently skip it.
+        if let pendingIndex = pendingCodeNewlineIndex {
+            currentIndex = pendingIndex
+            previousCharacter = pendingIndex > 0 ? textToType[pendingIndex - 1] : nil
+            progressFraction = Double(currentIndex) / Double(max(1, textToType.count))
+        }
+        pendingCodeNewlineWorkItem?.cancel()
+        pendingCodeNewlineWorkItem = nil
+        pendingCodeNewlineIndex = nil
 
         stopPeriodicFocusCheck()
 
@@ -943,6 +973,48 @@ final class TypingManager: NSObject, ObservableObject {
         insertedPasteboardChangeCount = nil
     }
 
+    /// Dismiss IDE completion before Return, so Enter cannot accept a suggestion
+    /// instead of creating a newline. No IDE preferences are modified.
+    /// After Return, reset to the start of the new line (see sendCharacter):
+    /// the IDE's auto-indent is applied first, then Cmd+Left makes the
+    /// source text's own leading spaces the only indent, instead of
+    /// compounding into the VS Code staircase.
+    private func sendCodeModeNewline() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let escapeKeyCode: CGKeyCode = 0x35 // kVK_Escape
+        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: escapeKeyCode, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: escapeKeyCode, keyDown: false) else {
+            sendReturnKey() // Do not drop the source newline on event allocation failure.
+            sendArrowKey(.left, withModifier: .command)
+            return
+        }
+        keyDown.flags = []
+        keyUp.flags = []
+        keyDown.setIntegerValueField(.eventSourceUserData, value: Self.syntheticDismissalEscapeTag)
+        keyUp.setIntegerValueField(.eventSourceUserData, value: Self.syntheticDismissalEscapeTag)
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
+
+        pendingCodeNewlineWorkItem?.cancel()
+        pendingCodeNewlineIndex = max(0, currentIndex - 1)
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self, self.state == .typing else { return }
+            guard self.isTargetWindowFocused() else {
+                self.pauseTyping()
+                return
+            }
+            self.pendingCodeNewlineWorkItem = nil
+            self.pendingCodeNewlineIndex = nil
+            self.sendReturnKey()
+            // Posted in order, after Return: the IDE applies auto-indent
+            // first, then this moves to column 0, so the next characters'
+            // own leading spaces are the only indent.
+            self.sendArrowKey(.left, withModifier: .command)
+        }
+        pendingCodeNewlineWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + CodeInputCore.suggestionDismissalDelay, execute: workItem)
+    }
+
     private func sendCharacter(_ character: Character) {
         let source = CGEventSource(stateID: .hidSystemState)
 
@@ -950,22 +1022,34 @@ final class TypingManager: NSObject, ObservableObject {
         let unicodeVal = character.unicodeScalars.first?.value ?? 0
         appLog("sendCharacter: '\(character)' (U+\(String(format: "%04X", unicodeVal)))", level: .verbose)
 
-        // Special-case newlines: send a real Return key event so apps treat it
-        // exactly like pressing the Enter/Return key, instead of a raw "\n".
+        // Code Mode simulated newlines, decided by the pure
+        // CodeInputCore.newlineDelivery (SwiftPM-tested) and executed
+        // here. Escape dismissal and its deferred Return (with pause
+        // retry) apply only to the initial simulated pass, because
+        // that retry machinery is tied to typing-phase state
+        // (currentIndex / textToType). The editing phase uses a
+        // separate edit-character scheduler, so it gets the simpler
+        // synchronous form: Return, then the same line-start reset.
+        // That fixes the staircase in revisions without importing the
+        // typing-phase deferred machinery into editing; completion
+        // dismissal during revisions remains an open gap, documented
+        // in README. Prose keeps its previous plain Return, and Exact
+        // Insert does not go through sendCharacter at all.
         if character == "\n" || character == "\r" {
-            let returnKeyCode: CGKeyCode = 0x24 // kVK_Return
-
-            guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: returnKeyCode, keyDown: true),
-                  let keyUp = CGEvent(keyboardEventSource: source, virtualKey: returnKeyCode, keyDown: false) else {
-                return
+            let delivery = CodeInputCore.newlineDelivery(
+                codeMode: isCodeMode,
+                initialSimulated: state == .typing && codeInputStrategy == .simulated,
+                editing: state == .editing
+            )
+            switch delivery {
+            case .dismissCompletionThenReturnThenReset:
+                sendCodeModeNewline()
+            case .returnThenReset:
+                sendReturnKey()
+                sendArrowKey(.left, withModifier: .command)
+            case .plainReturn:
+                sendReturnKey()
             }
-
-            // Explicitly clear modifier flags
-            keyDown.flags = []
-            keyUp.flags = []
-
-            keyDown.post(tap: .cghidEventTap)
-            keyUp.post(tap: .cghidEventTap)
             return
         }
         
@@ -2108,6 +2192,7 @@ final class TypingManager: NSObject, ObservableObject {
             let keycode = event.getIntegerValueField(.keyboardEventKeycode)
             // 53 is the keycode for ESC on macOS
             if keycode == 53,
+               event.getIntegerValueField(.eventSourceUserData) != TypingManager.syntheticDismissalEscapeTag,
                let userInfo = userInfo {
                 let manager = Unmanaged<TypingManager>.fromOpaque(userInfo).takeUnretainedValue()
                 DispatchQueue.main.async {
