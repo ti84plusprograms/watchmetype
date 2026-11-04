@@ -10,24 +10,6 @@ private class FixedIntrinsicScrollView: NSScrollView {
     }
 }
 
-/// NSTextView subclass that reports first-responder transitions so SwiftUI can show the
-/// focus border the moment the cursor lands in the field, not just when typing starts.
-private class FocusReportingTextView: NSTextView {
-    var onFocusChange: ((Bool) -> Void)?
-
-    override func becomeFirstResponder() -> Bool {
-        let result = super.becomeFirstResponder()
-        if result { onFocusChange?(true) }
-        return result
-    }
-
-    override func resignFirstResponder() -> Bool {
-        let result = super.resignFirstResponder()
-        if result { onFocusChange?(false) }
-        return result
-    }
-}
-
 struct NativeTextEditor: NSViewRepresentable {
     @Binding var text: String
     var accessibilityLabel: String = "Text editor"
@@ -36,13 +18,28 @@ struct NativeTextEditor: NSViewRepresentable {
     var isCodeMode: Bool = false
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = FixedIntrinsicScrollView()
-        let textView = FocusReportingTextView()
+        // AppKit must start with a real width; SwiftUI may briefly propose
+        // zero width during NSViewRepresentable layout.
+        let scrollView = FixedIntrinsicScrollView(
+            frame: NSRect(x: 0, y: 0, width: 640, height: 420)
+        )
+        let textView = CodeDraftTextView(
+            frame: NSRect(
+                origin: .zero,
+                size: scrollView.contentSize
+            )
+        )
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
 
         textView.isRichText = false
         textView.allowsUndo = true
         textView.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
-        textView.textColor = NSColor.textColor
+        textView.textColor = NSColor.labelColor
+        textView.insertionPointColor = NSColor.labelColor
         textView.backgroundColor = .clear
         textView.drawsBackground = false
         textView.isEditable = true
@@ -50,8 +47,12 @@ struct NativeTextEditor: NSViewRepresentable {
         textView.autoresizingMask = [.width]
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
-        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.containerSize = NSSize(
+            width: scrollView.contentSize.width,
+            height: CGFloat.greatestFiniteMagnitude
+        )
         textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.heightTracksTextView = false
         textView.delegate = context.coordinator
         textView.setAccessibilityLabel(accessibilityLabel)
 
@@ -61,6 +62,8 @@ struct NativeTextEditor: NSViewRepresentable {
         }
 
         scrollView.documentView = textView
+        scrollView.hasVerticalRuler = false
+        scrollView.rulersVisible = false
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
@@ -80,7 +83,7 @@ struct NativeTextEditor: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        guard let textView = scrollView.documentView as? NSTextView else { return }
+        guard let textView = scrollView.documentView as? CodeDraftTextView else { return }
         let contentChanged = textView.string != text
         if contentChanged {
             textView.string = text
@@ -97,8 +100,6 @@ struct NativeTextEditor: NSViewRepresentable {
         var isFocused: Binding<Bool>?
         private var codeMode = false
         private var pendingHighlight: DispatchWorkItem?
-        private var scrollObserver: NSObjectProtocol?
-        private weak var gutter: PythonLineNumberRulerView?
 
         // Remember how the original prose editor was configured so toggling
         // Code Mode off restores native text-input behavior.
@@ -118,12 +119,9 @@ struct NativeTextEditor: NSViewRepresentable {
 
         deinit {
             pendingHighlight?.cancel()
-            if let scrollObserver {
-                NotificationCenter.default.removeObserver(scrollObserver)
-            }
         }
 
-        func configure(textView: NSTextView, scrollView: NSScrollView, codeMode enabled: Bool, force: Bool = false) {
+        func configure(textView: CodeDraftTextView, scrollView: NSScrollView, codeMode enabled: Bool, force: Bool = false) {
             let switched = codeMode != enabled
             codeMode = enabled
 
@@ -153,22 +151,26 @@ struct NativeTextEditor: NSViewRepresentable {
                 if textView.font != desiredFont { textView.font = desiredFont }
             }
 
-            if gutter == nil {
-                let newGutter = PythonLineNumberRulerView(scrollView: scrollView, editor: textView)
-                scrollView.verticalRulerView = newGutter
-                gutter = newGutter
-                scrollView.contentView.postsBoundsChangedNotifications = true
-                scrollObserver = NotificationCenter.default.addObserver(
-                    forName: NSView.boundsDidChangeNotification,
-                    object: scrollView.contentView,
-                    queue: .main
-                ) { [weak newGutter] _ in
-                    newGutter?.needsDisplay = true
+            if switched || force {
+                // Reserve the gutter inside the text container, not as an
+                // NSRulerView that changes the scroll view's frame geometry.
+                let padding = CodeDraftTextView.standardLinePadding
+                    + (enabled ? CodeDraftTextView.codeGutterWidth : 0)
+                if textView.textContainer?.lineFragmentPadding != padding {
+                    textView.textContainer?.lineFragmentPadding = padding
+                    let fullRange = NSRange(
+                        location: 0,
+                        length: (textView.string as NSString).length
+                    )
+                    textView.layoutManager?.invalidateLayout(
+                        forCharacterRange: fullRange,
+                        actualCharacterRange: nil
+                    )
                 }
-            }
-            if scrollView.hasVerticalRuler != enabled || scrollView.rulersVisible != enabled {
-                scrollView.hasVerticalRuler = enabled
-                scrollView.rulersVisible = enabled
+                textView.showsCodeLineNumbers = enabled
+                textView.textColor = .labelColor
+                textView.insertionPointColor = .labelColor
+                textView.needsDisplay = true
             }
 
             // User typing is highlighted after a brief debounce in textDidChange.
@@ -176,7 +178,7 @@ struct NativeTextEditor: NSViewRepresentable {
             if switched || force {
                 pendingHighlight?.cancel()
                 CodeEditorAppearance.highlight(textView, enabled: enabled)
-                gutter?.needsDisplay = true
+                textView.needsDisplay = true
             }
         }
 
@@ -189,7 +191,7 @@ struct NativeTextEditor: NSViewRepresentable {
             let update = DispatchWorkItem { [weak self, weak textView] in
                 guard let self, let textView, self.codeMode else { return }
                 CodeEditorAppearance.highlight(textView, enabled: true)
-                self.gutter?.needsDisplay = true
+                textView.needsDisplay = true
             }
             pendingHighlight = update
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.07, execute: update)
@@ -296,7 +298,7 @@ private struct DraftEditor: View {
                     .foregroundColor(.secondary)
                     .font(isCodeMode ? .system(.body, design: .monospaced) : .body)
                     .padding(.top, 9)
-                    .padding(.leading, 13 + (isCodeMode ? PythonLineNumberRulerView.gutterWidth : 0))
+                    .padding(.leading, 13 + (isCodeMode ? CodeDraftTextView.codeGutterWidth : 0))
                     .allowsHitTesting(false)
             }
         }
