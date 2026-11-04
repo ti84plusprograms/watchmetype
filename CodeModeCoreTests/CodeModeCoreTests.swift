@@ -87,7 +87,9 @@ final class CodeModeCoreTests: XCTestCase {
     }
 
     func testStructuralPacing() {
-        XCTAssertGreaterThanOrEqual(CodeInputCore.minimumDelay(after: "\n"), 0.1)
+        XCTAssertGreaterThanOrEqual(CodeInputCore.minimumDelay(after: "\n"), 0.25)
+        XCTAssertGreaterThan(CodeInputCore.minimumDelay(after: "\n"), CodeInputCore.suggestionDismissalDelay)
+        XCTAssertEqual(CodeInputCore.minimumDelay(after: "\r"), CodeInputCore.minimumDelay(after: "\n"))
         XCTAssertGreaterThanOrEqual(CodeInputCore.minimumDelay(after: "\t"), 0.1)
         XCTAssertGreaterThan(CodeInputCore.minimumDelay(after: "{"), 0)
         XCTAssertEqual(CodeInputCore.minimumDelay(after: "a"), 0)
