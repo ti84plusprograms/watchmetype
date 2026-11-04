@@ -513,7 +513,17 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            mainFormContent
+            // Give the form a finite, top-anchored height. Without this, its
+            // flexible editor/scroll views can report a size larger than the
+            // window and SwiftUI may centre it with the title off-screen.
+            GeometryReader { geometry in
+                mainFormContent
+                    .frame(
+                        width: geometry.size.width,
+                        height: geometry.size.height,
+                        alignment: .topLeading
+                    )
+            }
 
             if isOverlayVisible {
                 overlayContent
@@ -697,9 +707,9 @@ struct ContentView: View {
 
             HStack(alignment: .top, spacing: 16) {
                 draftEditorsSection
-                    .frame(maxHeight: .infinity)
+                    .frame(maxHeight: .infinity, alignment: .top)
                 settingsColumn
-                    .frame(maxHeight: .infinity)
+                    .frame(maxHeight: .infinity, alignment: .top)
             }
             .frame(maxHeight: .infinity)
         }
