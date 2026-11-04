@@ -111,6 +111,96 @@ This is a **pre-release checklist only**; no signing key or release is created b
 - Sign/notarize a fork-owned release, sign its update archive with the fork key, publish and verify `docs/appcast.xml` on the fork's Pages domain, and only then restore Sparkle startup/menus and consider enabling automatic checks. Do not copy upstream signatures or keys.
 - The `fork-identity-ci.yml` workflow tests the unsigned app's identity and disabled-update configuration. It cannot verify a locally signed, notarized release or actual macOS Accessibility behavior.
 
+## Code Mode (feature branch)
+
+The original SwiftUI layout is retained. The existing **Typing Speed** card now
+includes **Code Mode**, **Thinking Pauses**, and **Simulate Mistakes** controls.
+The original prose slider remains **40–120 WPM**, initially at 80 WPM with
+thinking and mistakes on. Code Mode offers **40–400 WPM**, with thinking and
+mistakes initially off; it retains the current numeric WPM when switched on. Slider endpoints and labels change with Code Mode. Switching modes keeps the
+current numeric WPM, capped to the destination range (e.g., 120 prose → 120
+code; 350 code → 120 prose). The slider thumb moves to the appropriate relative
+position. Thinking and mistake preferences remain independent per mode.
+
+**Code Mode** sends the supplied source text without running the Clean-Up
+processor. Its Clean-Up panel is disabled to protect indentation, tabs, blank
+lines, and trailing whitespace. Normal prose cleanup remains available.
+
+### Python-first code editor
+
+Switching on **Code Mode** changes the appearance of all visible Draft editors
+without changing their source strings: monospaced font, tinted editor background,
+distinct border, PYTHON indicator, a scroll-synchronized line-number gutter,
+and line/character counts in place of prose word counts. Returning to Normal
+Mode restores the original appearance and the original macOS text-input
+preferences. Code Mode disables smart quotes, smart dashes, automatic spelling
+correction, text replacement, and automatic text completion inside Watch Me Type
+so Python punctuation is not silently rewritten.
+
+The Python lexer colors common keywords, definitions, decorators, built-ins,
+numbers, constants, comments, and single/double/triple-quoted strings (including
+simple string prefixes and f-strings). Coloring uses temporary TextKit layout
+attributes, leaving the backing plain text, selection, and undo history intact.
+This is *syntax highlighting*, not a compiler or full Python parser. Complex
+f-string interpolation and arbitrary-language detection are not implemented.
+Non-Python code remains unmodified but may receive misleading Python colors;
+for now the language indicator explicitly says **PYTHON**.
+
+The SwiftPM test target runs regression cases for Unicode UTF-16 highlight
+ranges, quoted hash characters, triple-quoted strings, decorators, escapes,
+and untouched source text. GitHub Actions also compiles the AppKit UI; it does
+not test actual interaction, scrolling or macOS Accessibility behavior, which
+must be verified in Xcode.
+
+**Code Input** uses an extra compact control inside the existing Typing Speed
+card. **Simulated** types characters individually (with a longer pause after
+newlines, tabs, and brackets to give editors time to process them); it may still
+be affected by an IDE's automatic indentation, brace completion, or formatting.
+For simulated typing, disable auto-indent, format-on-type, automatic bracket
+pairing, completion, and autocorrect in the destination editor.
+
+**Exact Insert** instead issues a single standard macOS Paste command with
+the complete source text. This avoids per-Return autoindent and per-character
+bracket completion. The clipboard's readable formats are restored after the
+IDE has time to consume the paste, provided no other process has changed the
+clipboard in the meantime. Some IDEs format pasted text; disable format-on-paste
+to improve fidelity. Exact Insert is one bulk insertion, not simulated typing,
+does not honor Custom Typing Duration, and does not verify the resulting text.
+Draft 2/3 revision phases still use simulated edits.
+
+**Code revisions** use a deterministic line-aligned changed region, avoiding
+sentence and word similarity heuristics. This is intentionally conservative:
+a change spanning many lines can retype the full changed section. Prose
+revisions continue using the original algorithm. This application cannot
+guarantee exact behavior in every third-party editor.
+
+**Thinking Pauses** controls random word, punctuation, and paragraph delays
+during both typing and revisions. An explicit **Custom Duration** can still
+introduce deliberate delays. **Simulate Mistakes** is independent of thinking.
+At very high WPM some editors may drop synthetic key events: start with
+160–240 WPM and check the output before increasing to 400.
+
+**Testing checklist:** on a disposable text file, verify a function with
+nested indentation, multiple blank lines, tabs, punctuation, and a trailing
+newline at 80 and 240 WPM. Then verify Draft 1 → 2 with a small replacement.
+Compare the final text literally, not just visually.
+
+**If the countdown runs but no text appears:** first try a disposable
+plain-text TextEdit document, with the caret visibly inside the text area
+before countdown reaches zero. An Xcode-run build may need Accessibility
+permission separately from the installed DMG. Check **System Settings >
+Privacy & Security > Accessibility** for the build you are actually running;
+quit and reopen it after granting permission if needed. The app now rechecks
+permission on Start and again when the countdown ends, and displays an
+actionable error if no external target application is frontmost. If TextEdit
+works but a browser editor does not, investigate the browser's text focus and
+autocorrection behavior. The source cannot verify delivery into every
+third-party editor.
+
+Normal prose mode and its revision algorithm remain unchanged. Code Mode
+alone uses the line-aware diff. The experimental *edit already existing Google
+Doc* branch is not included.
+
 ## Usage notes
 
 - While the app is typing, the device is effectively unavailable; switching apps auto-pauses until you return. I would recommend running this in a VM.
@@ -138,9 +228,25 @@ xcodebuild -project "Watch Me Type.xcodeproj" -scheme "Watch Me Type" -destinati
 
 ## Run tests
 
+The Xcode project currently has **no XCTest target**. The existing
+`Watch Me TypeTests` source files are not connected to its scheme, so
+`xcodebuild test` is **not** a valid test command for this project.
+
+Code Mode's cross-platform parsing/diff tests are connected to a standalone
+Swift package. Run them with:
+
 ```bash
-xcodebuild -project "Watch Me Type.xcodeproj" -scheme "Watch Me Type" -destination 'platform=macOS' test
+swift test --package-path .
 ```
+
+The `.github/workflows/macos-code-mode.yml` workflow runs that test command
+and builds the macOS application with signing disabled on `macos-15` using
+Xcode 26.3. It records the checked-out commit, runner, Xcode/Swift versions,
+SHA-256 checksums of the evidence, and logs as run artifacts. The CI evidence
+does **not** include an installable build because the project's source-available
+license prohibits redistribution of modified binaries without permission.
+It also cannot test whether macOS Accessibility keystrokes are accepted
+inside a particular IDE; that still requires a manually authorized GUI session.
 
 ## Contributing
 
