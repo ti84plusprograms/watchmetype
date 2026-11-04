@@ -1,0 +1,148 @@
+name: Fork identity and macOS build
+
+on:
+  push:
+    branches:
+      - fix/fork-identity
+      - integration/fork-identity-code-mode
+  pull_request:
+    branches:
+      - main
+      - feature/code-mode  # integration review into the active feature branch
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-identity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify fork identity, builds, and available Swift tests
+    runs-on: macos-15
+    timeout-minutes: 50
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode and record provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
+          mkdir -p ci-evidence
+          {
+            echo "repository=${{ github.repository }}"
+            echo "ref=${{ github.ref }}"
+            echo "sha=${{ github.sha }}"
+            echo "checkout=$(git rev-parse HEAD)"
+            echo "run_id=${{ github.run_id }}"
+            echo "attempt=${{ github.run_attempt }}"
+            echo "runner_image=$ImageOS $ImageVersion"
+            xcodebuild -version
+            swift --version
+          } | tee ci-evidence/provenance.txt
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+
+      - name: Check update configuration and appcast
+        shell: bash
+        run: |
+          set -euo pipefail
+          plutil -lint Watch-Me-Type-Info.plist | tee ci-evidence/plist.log
+          xmllint --noout docs/appcast.xml
+          test "$(plutil -extract SUEnableAutomaticChecks raw -o - Watch-Me-Type-Info.plist)" = "false"
+          if grep -qE 'SPUStandardUpdaterController|checkForUpdates\(' "Watch Me Type/Watch_Me_TypeApp.swift"; then
+            echo "Fork still starts updater or exposes a manual update action" >&2
+            exit 1
+          fi
+          if grep -q '0xff-r4bbit.github.io' Watch-Me-Type-Info.plist; then
+            echo "Fork still uses upstream update feed" >&2
+            exit 1
+          fi
+          if grep -q 'SUPublicEDKey' Watch-Me-Type-Info.plist; then
+            echo "Fork still embeds an update signing key before release" >&2
+            exit 1
+          fi
+          echo "Update system disabled; fork feed configuration verified." | tee ci-evidence/update-config.txt
+
+      - name: Run SwiftPM tests when package is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -f Package.swift; then
+            swift test --package-path . 2>&1 | tee ci-evidence/swift-test.log
+          else
+            echo "Package.swift absent on this branch; SwiftPM tests not applicable." | tee ci-evidence/swift-test.log
+          fi
+
+      - name: Build Debug and assert dev bundle identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project "Watch Me Type.xcodeproj" \
+            -scheme "Watch Me Type" \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/watchmetype-derived-data" \
+            CODE_SIGNING_ALLOWED=NO DEVELOPMENT_TEAM="" \
+            build 2>&1 | tee ci-evidence/debug-build.log
+          APP="$RUNNER_TEMP/watchmetype-derived-data/Build/Products/Debug/Watch Me Type.app/Contents/Info.plist"
+          test -f "$APP"
+          test "$(plutil -extract CFBundleIdentifier raw -o - "$APP")" = "com.ti84plusprograms.watchmetype.dev"
+          test "$(plutil -extract CFBundleDisplayName raw -o - "$APP")" = "Watch Me Type Dev"
+          echo "Debug app bundle/display identity verified." | tee ci-evidence/debug-identity.txt
+
+      - name: Build Release and assert release bundle identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project "Watch Me Type.xcodeproj" \
+            -scheme "Watch Me Type" \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/watchmetype-derived-data" \
+            CODE_SIGNING_ALLOWED=NO DEVELOPMENT_TEAM="" \
+            build 2>&1 | tee ci-evidence/release-build.log
+          APP="$RUNNER_TEMP/watchmetype-derived-data/Build/Products/Release/Watch Me Type.app/Contents/Info.plist"
+          test -f "$APP"
+          test "$(plutil -extract CFBundleIdentifier raw -o - "$APP")" = "com.ti84plusprograms.watchmetype"
+          test "$(plutil -extract CFBundleDisplayName raw -o - "$APP")" = "Watch Me Type Fork"
+          echo "Release app bundle/display identity verified." | tee ci-evidence/release-identity.txt
+
+      - name: Create verifiable run manifest
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-evidence
+          {
+            echo "sha=${{ github.sha }}"
+            echo "run_id=${{ github.run_id }}"
+            echo "run_attempt=${{ github.run_attempt }}"
+            echo "job_status=${{ job.status }}"
+          } > ci-evidence/result.txt
+          (cd ci-evidence && shasum -a 256 *.txt *.log 2>/dev/null || true) > ci-evidence/SHA256SUMS
+          {
+            echo "### Fork identity verification"
+            echo "- Commit: \`${{ github.sha }}\`"
+            echo "- Result: ${{ job.status }}"
+            echo "- Unsigned Debug and Release builds with bundle ID assertions"
+            echo "- SwiftPM regression tests if Package.swift exists"
+            echo "- Evidence: logs, provenance, and SHA-256 checksums"
+            echo "- No signed binaries or releases are published"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-identity-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-evidence/
+          if-no-files-found: error
+          retention-days: 30
