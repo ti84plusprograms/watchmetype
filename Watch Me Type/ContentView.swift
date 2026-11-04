@@ -10,38 +10,37 @@ private class FixedIntrinsicScrollView: NSScrollView {
     }
 }
 
-/// NSTextView subclass that reports first-responder transitions so SwiftUI can show the
-/// focus border the moment the cursor lands in the field, not just when typing starts.
-private class FocusReportingTextView: NSTextView {
-    var onFocusChange: ((Bool) -> Void)?
-
-    override func becomeFirstResponder() -> Bool {
-        let result = super.becomeFirstResponder()
-        if result { onFocusChange?(true) }
-        return result
-    }
-
-    override func resignFirstResponder() -> Bool {
-        let result = super.resignFirstResponder()
-        if result { onFocusChange?(false) }
-        return result
-    }
-}
-
 struct NativeTextEditor: NSViewRepresentable {
     @Binding var text: String
     var accessibilityLabel: String = "Text editor"
+    var accessibilityIdentifier: String = "draftEditor"
     var isFocused: Binding<Bool>? = nil
     var focusOnAppear: Bool = false
+    var isCodeMode: Bool = false
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = FixedIntrinsicScrollView()
-        let textView = FocusReportingTextView()
+        // AppKit must start with a real width; SwiftUI may briefly propose
+        // zero width during NSViewRepresentable layout.
+        let scrollView = FixedIntrinsicScrollView(
+            frame: NSRect(x: 0, y: 0, width: 640, height: 420)
+        )
+        let textView = CodeDraftTextView(
+            frame: NSRect(
+                origin: .zero,
+                size: scrollView.contentSize
+            )
+        )
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
 
         textView.isRichText = false
         textView.allowsUndo = true
         textView.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
-        textView.textColor = NSColor.textColor
+        textView.textColor = NSColor.labelColor
+        textView.insertionPointColor = NSColor.labelColor
         textView.backgroundColor = .clear
         textView.drawsBackground = false
         textView.isEditable = true
@@ -49,10 +48,15 @@ struct NativeTextEditor: NSViewRepresentable {
         textView.autoresizingMask = [.width]
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
-        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.containerSize = NSSize(
+            width: scrollView.contentSize.width,
+            height: CGFloat.greatestFiniteMagnitude
+        )
         textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.heightTracksTextView = false
         textView.delegate = context.coordinator
         textView.setAccessibilityLabel(accessibilityLabel)
+        textView.setAccessibilityIdentifier(accessibilityIdentifier)
 
         let coordinator = context.coordinator
         textView.onFocusChange = { [weak coordinator] focused in
@@ -60,12 +64,16 @@ struct NativeTextEditor: NSViewRepresentable {
         }
 
         scrollView.documentView = textView
+        scrollView.hasVerticalRuler = false
+        scrollView.rulersVisible = false
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
+
+        context.coordinator.configure(textView: textView, scrollView: scrollView, codeMode: isCodeMode, force: true)
 
         if focusOnAppear {
             DispatchQueue.main.async {
@@ -77,10 +85,12 @@ struct NativeTextEditor: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        guard let textView = scrollView.documentView as? NSTextView else { return }
-        if textView.string != text {
+        guard let textView = scrollView.documentView as? CodeDraftTextView else { return }
+        let contentChanged = textView.string != text
+        if contentChanged {
             textView.string = text
         }
+        context.coordinator.configure(textView: textView, scrollView: scrollView, codeMode: isCodeMode, force: contentChanged)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -90,15 +100,103 @@ struct NativeTextEditor: NSViewRepresentable {
     class Coordinator: NSObject, NSTextViewDelegate {
         var text: Binding<String>
         var isFocused: Binding<Bool>?
+        private var codeMode = false
+        private var pendingHighlight: DispatchWorkItem?
+
+        // Remember how the original prose editor was configured so toggling
+        // Code Mode off restores native text-input behavior.
+        private struct InputSettings {
+            var quoteSubstitution: Bool
+            var dashSubstitution: Bool
+            var spellingCorrection: Bool
+            var textReplacement: Bool
+            var completion: Bool
+        }
+        private var proseInputSettings: InputSettings?
 
         init(text: Binding<String>, isFocused: Binding<Bool>?) {
             self.text = text
             self.isFocused = isFocused
         }
 
+        deinit {
+            pendingHighlight?.cancel()
+        }
+
+        func configure(textView: CodeDraftTextView, scrollView: NSScrollView, codeMode enabled: Bool, force: Bool = false) {
+            let switched = codeMode != enabled
+            codeMode = enabled
+
+            if proseInputSettings == nil {
+                proseInputSettings = InputSettings(
+                    quoteSubstitution: textView.isAutomaticQuoteSubstitutionEnabled,
+                    dashSubstitution: textView.isAutomaticDashSubstitutionEnabled,
+                    spellingCorrection: textView.isAutomaticSpellingCorrectionEnabled,
+                    textReplacement: textView.isAutomaticTextReplacementEnabled,
+                    completion: textView.isAutomaticTextCompletionEnabled
+                )
+            }
+
+            if switched || force {
+                let original = proseInputSettings!
+                textView.isAutomaticQuoteSubstitutionEnabled = enabled ? false : original.quoteSubstitution
+                textView.isAutomaticDashSubstitutionEnabled = enabled ? false : original.dashSubstitution
+                textView.isAutomaticSpellingCorrectionEnabled = enabled ? false : original.spellingCorrection
+                textView.isAutomaticTextReplacementEnabled = enabled ? false : original.textReplacement
+                textView.isAutomaticTextCompletionEnabled = enabled ? false : original.completion
+            }
+
+            let desiredFont = enabled
+                ? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+                : NSFont.systemFont(ofSize: NSFont.systemFontSize)
+            if switched || force {
+                if textView.font != desiredFont { textView.font = desiredFont }
+            }
+
+            if switched || force {
+                // Reserve the gutter inside the text container, not as an
+                // NSRulerView that changes the scroll view's frame geometry.
+                let padding = CodeDraftTextView.standardLinePadding
+                    + (enabled ? CodeDraftTextView.codeGutterWidth : 0)
+                if textView.textContainer?.lineFragmentPadding != padding {
+                    textView.textContainer?.lineFragmentPadding = padding
+                    let fullRange = NSRange(
+                        location: 0,
+                        length: (textView.string as NSString).length
+                    )
+                    textView.layoutManager?.invalidateLayout(
+                        forCharacterRange: fullRange,
+                        actualCharacterRange: nil
+                    )
+                }
+                textView.showsCodeLineNumbers = enabled
+                textView.textColor = .labelColor
+                textView.insertionPointColor = .labelColor
+                textView.needsDisplay = true
+            }
+
+            // User typing is highlighted after a brief debounce in textDidChange.
+            // Don't synchronously re-lex the full buffer on every SwiftUI update.
+            if switched || force {
+                pendingHighlight?.cancel()
+                CodeEditorAppearance.highlight(textView, enabled: enabled)
+                textView.needsDisplay = true
+            }
+        }
+
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             text.wrappedValue = textView.string
+            guard codeMode else { return }
+
+            pendingHighlight?.cancel()
+            let update = DispatchWorkItem { [weak self, weak textView] in
+                guard let self, let textView, self.codeMode else { return }
+                CodeEditorAppearance.highlight(textView, enabled: true)
+                textView.needsDisplay = true
+            }
+            pendingHighlight = update
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.07, execute: update)
         }
 
         func handleFocusChange(_ focused: Bool) {
@@ -167,9 +265,19 @@ private struct DraftEditor: View {
     let placeholder: LocalizedStringKey
     let editorAccessibilityLabel: String
     @Binding var isFocused: Bool
+
+    private var editorIdentifier: String {
+        switch title {
+        case "Draft 1": "draft1Editor"
+        case "Draft 2": "draft2Editor"
+        case "Draft 3": "draft3Editor"
+        default: "draftEditor"
+        }
+    }
     var showsTitle: Bool = true
     var cornerStyle: DraftEditorCornerStyle = .full
     var focusOnAppear: Bool = false
+    var isCodeMode: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -189,17 +297,20 @@ private struct DraftEditor: View {
             NativeTextEditor(
                 text: $text,
                 accessibilityLabel: editorAccessibilityLabel,
+                accessibilityIdentifier: editorIdentifier,
                 isFocused: $isFocused,
-                focusOnAppear: focusOnAppear
+                focusOnAppear: focusOnAppear,
+                isCodeMode: isCodeMode
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(8)
 
-            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if isCodeMode ? text.isEmpty : text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(placeholder)
                     .foregroundColor(.secondary)
+                    .font(isCodeMode ? .system(.body, design: .monospaced) : .body)
                     .padding(.top, 9)
-                    .padding(.leading, 13)
+                    .padding(.leading, 13 + (isCodeMode ? CodeDraftTextView.codeGutterWidth : 0))
                     .allowsHitTesting(false)
             }
         }
@@ -210,18 +321,19 @@ private struct DraftEditor: View {
             core
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color(NSColor.textBackgroundColor))
+                        .fill(isCodeMode ? Color(NSColor.controlBackgroundColor) : Color(NSColor.textBackgroundColor))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(isFocused ? Color.accentColor : Color.secondary.opacity(0.3),
+                        .stroke(isFocused ? Color.accentColor
+                                : (isCodeMode ? Color.blue.opacity(0.5) : Color.secondary.opacity(0.3)),
                                 lineWidth: isFocused ? 2 : 1)
                 )
                 .animation(.easeOut(duration: 0.15), value: isFocused)
 
         case .bare:
             core
-                .background(Color(NSColor.textBackgroundColor))
+                .background(isCodeMode ? Color(NSColor.controlBackgroundColor) : Color(NSColor.textBackgroundColor))
         }
     }
 }
@@ -243,9 +355,68 @@ enum DurationUnit: String, CaseIterable, Identifiable {
 }
 
 
+/// Only pause and mistake preferences are mode-specific. Speed stays numeric
+/// when the mode changes; it is capped only when entering the smaller range.
+private struct TypingPreferences {
+    var thinking: Bool
+    var mistakes: Bool
+}
+
+/// Shared speed policy for the slider and its regression tests.
+enum TypingSpeedPolicy {
+    static func range(forCodeMode enabled: Bool) -> ClosedRange<Double> {
+        enabled ? 40.0...400.0 : 40.0...120.0
+    }
+
+    static func adjusted(_ currentWPM: Double, forCodeMode enabled: Bool) -> Double {
+        let allowed = range(forCodeMode: enabled)
+        return min(max(currentWPM, allowed.lowerBound), allowed.upperBound)
+    }
+}
+
 struct ContentView: View {
-    @State private var inputText: String = ""
+    @State private var inputText: String = UIRegressionFixture.draft1
     @State private var targetWPM: Double = 80
+    @State private var codeMode: Bool = UIRegressionFixture.codeMode
+    @State private var codeInputStrategy: CodeInputStrategy = .simulated
+    @State private var includeThinkingPauses: Bool = !UIRegressionFixture.codeMode
+    @State private var simulateMistakes: Bool = !UIRegressionFixture.codeMode
+    @State private var prosePreferences = TypingPreferences(thinking: true, mistakes: true)
+    @State private var codePreferences = TypingPreferences(thinking: false, mistakes: false)
+
+    // Keep the upstream prose range and use a wider scale only for code.
+    private var typingSpeedRange: ClosedRange<Double> {
+        TypingSpeedPolicy.range(forCodeMode: codeMode)
+    }
+
+    private var codeModeBinding: Binding<Bool> {
+        Binding(
+            get: { codeMode },
+            set: { enabled in
+                guard enabled != codeMode else { return }
+
+                // Thinking and mistakes remain mode-specific. WPM does not:
+                // 120 prose -> 120 code (a different relative slider position).
+                // 350 code -> 120 prose (the maximum allowed prose speed).
+                let current = TypingPreferences(
+                    thinking: includeThinkingPauses,
+                    mistakes: simulateMistakes
+                )
+                if codeMode {
+                    codePreferences = current
+                } else {
+                    prosePreferences = current
+                }
+
+                let selected = enabled ? codePreferences : prosePreferences
+                targetWPM = TypingSpeedPolicy.adjusted(targetWPM, forCodeMode: enabled)
+                includeThinkingPauses = selected.thinking
+                simulateMistakes = selected.mistakes
+                codeMode = enabled
+            }
+        )
+    }
+
     @State private var removeBlankLines: Bool = false
     @State private var removeEmojis: Bool = false
     @State private var removeHorizontalRules: Bool = false
@@ -285,10 +456,10 @@ struct ContentView: View {
     @State private var durationUnit: DurationUnit = .minutes
 
     // Two-draft editing mode
-    @State private var showDraft2: Bool = false
-    @State private var inputTextDraft2: String = ""
-    @State private var showDraft3: Bool = false
-    @State private var inputTextDraft3: String = ""
+    @State private var showDraft2: Bool = UIRegressionFixture.showDraft2
+    @State private var inputTextDraft2: String = UIRegressionFixture.draft2
+    @State private var showDraft3: Bool = UIRegressionFixture.showDraft3
+    @State private var inputTextDraft3: String = UIRegressionFixture.draft3
     @State private var customEditingDuration: Bool = false
     @State private var editingDurationValue: String = ""
     @State private var editingDurationUnit: DurationUnit = .minutes
@@ -346,13 +517,25 @@ struct ContentView: View {
         return typingManager.estimateEditingTime(
             draft1: inputText,
             draft2: inputTextDraft2,
-            wpm: Int(targetWPM)
+            wpm: Int(targetWPM),
+            includeThinkingPauses: includeThinkingPauses,
+            codeMode: codeMode
         )
     }
 
     var body: some View {
         ZStack {
-            mainFormContent
+            // Give the form a finite, top-anchored height. Without this, its
+            // flexible editor/scroll views can report a size larger than the
+            // window and SwiftUI may centre it with the title off-screen.
+            GeometryReader { geometry in
+                mainFormContent
+                    .frame(
+                        width: geometry.size.width,
+                        height: geometry.size.height,
+                        alignment: .topLeading
+                    )
+            }
 
             if isOverlayVisible {
                 overlayContent
@@ -413,6 +596,15 @@ struct ContentView: View {
                 }
             }
         }
+        .onChange(of: typingManager.lastTypingStartError) { _, error in
+            guard let error else { return }
+            let alert = NSAlert()
+            alert.messageText = "Typing couldn't start"
+            alert.informativeText = error
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            typingManager.lastTypingStartError = nil
+        }
         .onChange(of: typingManager.lastEditingError) { _, error in
             if let error = error {
                 editingErrorMessage = """
@@ -434,6 +626,7 @@ struct ContentView: View {
         }
         .alert("Ready to type?", isPresented: $showStartConfirmation) {
             Button("Start") {
+                guard !UIRegressionFixture.isRunning else { return }
                 if hasSecondDraft {
                     typingManager.startTwoPhaseTyping(
                         draft1: inputText,
@@ -444,15 +637,21 @@ struct ContentView: View {
                         typingDuration: desiredDurationSeconds,
                         editingDuration: editingDurationSeconds,
                         editingDuration2: editingDuration2Seconds,
-                        simulateMistakes: true
+                        simulateMistakes: simulateMistakes,
+                        includeThinkingPauses: includeThinkingPauses,
+                        codeMode: codeMode,
+                        codeInputStrategy: codeInputStrategy
                     )
                 } else {
                     typingManager.startTyping(
                         text: inputText,
                         wpm: Int(targetWPM),
                         countdown: 10,
-                        totalDurationSeconds: desiredDurationSeconds,
-                        simulateMistakes: true
+                        totalDurationSeconds: (codeMode && codeInputStrategy == .exactInsert) ? nil : desiredDurationSeconds,
+                        simulateMistakes: simulateMistakes,
+                        includeThinkingPauses: includeThinkingPauses,
+                        codeMode: codeMode,
+                        codeInputStrategy: codeInputStrategy
                     )
                 }
             }
@@ -496,6 +695,7 @@ struct ContentView: View {
                     Text("Watch Me Type")
                         .font(.title)
                         .bold()
+                        .accessibilityIdentifier("mainHeading")
 
                     Button {
                         showHowItWorksSheet = true
@@ -521,9 +721,9 @@ struct ContentView: View {
 
             HStack(alignment: .top, spacing: 16) {
                 draftEditorsSection
-                    .frame(maxHeight: .infinity)
+                    .frame(maxHeight: .infinity, alignment: .top)
                 settingsColumn
-                    .frame(maxHeight: .infinity)
+                    .frame(maxHeight: .infinity, alignment: .top)
             }
             .frame(maxHeight: .infinity)
         }
@@ -532,6 +732,9 @@ struct ContentView: View {
             minWidth: isOverlayVisible ? defaultWindowWidth * 0.5 : idealWindowWidth,
             idealWidth: idealWindowWidth
         )
+        // Keep the title and draft headers at the top when code settings
+        // increase the form's natural height.
+        .frame(maxHeight: .infinity, alignment: .top)
         .allowsHitTesting(!isOverlayVisible)
     }
 
@@ -546,9 +749,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             EqualWidthHStack(spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Draft 1")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                    draftHeader("Draft 1")
 
                     draftEditorView(
                         title: "Draft 1",
@@ -565,7 +766,7 @@ struct ContentView: View {
                         Toggle("I have a draft 2.", isOn: $showDraft2)
                             .font(.caption)
                         Spacer()
-                        Text("\(wordCount(of: inputText)) words")
+                        Text(draftStatus(for: inputText))
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -574,9 +775,7 @@ struct ContentView: View {
 
                 if showDraft2 {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Draft 2")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                        draftHeader("Draft 2")
 
                         fusedDraftPanel(
                             focused: isDraft2EditorFocused,
@@ -598,7 +797,7 @@ struct ContentView: View {
                             Toggle("I have a draft 3.", isOn: $showDraft3)
                                 .font(.caption)
                             Spacer()
-                            Text("\(wordCount(of: inputTextDraft2)) words")
+                            Text(draftStatus(for: inputTextDraft2))
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -608,9 +807,7 @@ struct ContentView: View {
 
                 if showDraft2 && showDraft3 {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Draft 3")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                        draftHeader("Draft 3")
 
                         fusedDraftPanel(
                             focused: isDraft3EditorFocused,
@@ -634,7 +831,7 @@ struct ContentView: View {
                                 .font(.caption)
                                 .hidden()
                             Spacer()
-                            Text("\(wordCount(of: inputTextDraft3)) words")
+                            Text(draftStatus(for: inputTextDraft3))
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -650,6 +847,31 @@ struct ContentView: View {
 
     private func wordCount(of text: String) -> Int {
         text.split(omittingEmptySubsequences: true, whereSeparator: { $0.isWhitespace || $0.isNewline }).count
+    }
+
+    private func draftHeader(_ name: String) -> some View {
+        HStack(spacing: 7) {
+            Text(name)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .accessibilityIdentifier("draftHeading-" + name)
+            if codeMode {
+                Text("PYTHON")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.blue.opacity(0.10)))
+                    .accessibilityLabel("Python code editor active")
+                    .accessibilityIdentifier("pythonBadge")
+            }
+        }
+    }
+
+    private func draftStatus(for text: String) -> String {
+        guard codeMode else { return "\(wordCount(of: text)) words" }
+        let lines = max(1, CodeInputCore.lineCount(in: text))
+        return "\(lines) \(lines == 1 ? "line" : "lines") · \(text.count) characters"
     }
 
     @ViewBuilder
@@ -728,7 +950,8 @@ struct ContentView: View {
             isFocused: isFocused,
             showsTitle: showsTitle,
             cornerStyle: cornerStyle,
-            focusOnAppear: focusOnAppear
+            focusOnAppear: focusOnAppear,
+            isCodeMode: codeMode
         )
     }
 
@@ -760,10 +983,20 @@ struct ContentView: View {
                 // Extra horizontal space so glow shadow isn't clipped by parent
                 .padding(.horizontal, 4)
 
-            cleanUpCard
-            typingSpeedCard
-
-            Spacer(minLength: 0)
+            // Preserve the original card appearance while keeping the Start
+            // button visible if the additional settings exceed window height.
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 12) {
+                    if codeMode {
+                        codeFormattingNotice
+                    } else {
+                        cleanUpCard
+                    }
+                    typingSpeedCard
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .scrollIndicators(.hidden)
 
             VStack(spacing: 6) {
                 if !hasFirstDraft {
@@ -773,6 +1006,11 @@ struct ContentView: View {
                 }
 
                 Button {
+                    guard !UIRegressionFixture.isRunning else { return }
+                    guard AccessibilityPermissionHelper.isTrusted else {
+                        showTypingAccessibilityRequiredAlert()
+                        return
+                    }
                     showStartConfirmation = true
                 } label: {
                     Text("Start")
@@ -781,9 +1019,9 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                 }
-                .buttonStyle(StartButtonStyle(isEnabled: hasFirstDraft))
+                .buttonStyle(StartButtonStyle(isEnabled: hasFirstDraft && !UIRegressionFixture.isRunning))
                 .keyboardShortcut(.return, modifiers: .command)
-                .disabled(!hasFirstDraft)
+                .disabled(!hasFirstDraft || UIRegressionFixture.isRunning)
                 .accessibilityHint(!hasFirstDraft
                     ? "Paste text in Draft 1 to enable"
                     : "Starts typing simulation with a 10-second countdown")
@@ -807,6 +1045,34 @@ struct ContentView: View {
                 replaceEmDashesWithCommas = newValue
             }
         )
+    }
+
+    private var codeFormattingNotice: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "curlybraces")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Source formatting preserved")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+
+                Text("Clean-Up is disabled in Code Mode to preserve indentation, whitespace, and code structure.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("codeFormattingNotice")
     }
 
     @ViewBuilder
@@ -868,7 +1134,7 @@ struct ContentView: View {
                     Text("Target Speed: \(Int(targetWPM)) WPM")
                         .font(.subheadline)
 
-                    Slider(value: $targetWPM, in: 40...120, step: 10)
+                    Slider(value: $targetWPM, in: typingSpeedRange, step: 10)
 
                     HStack {
                         Image(systemName: "tortoise")
@@ -878,7 +1144,7 @@ struct ContentView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Spacer()
-                        Text("avg. human")
+                        Text(codeMode ? "Balanced" : "avg. human")
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Spacer()
@@ -894,18 +1160,54 @@ struct ContentView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Spacer()
-                        Text("120")
+                        Text(codeMode ? "400" : "120")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                 }
 
+                Toggle("Code Mode", isOn: codeModeBinding)
+                    .accessibilityIdentifier("codeModeToggle")
+                    .font(.subheadline)
+                    .help("Preserve source whitespace; choose between simulated keystrokes and exact insertion.")
+
+                if codeMode {
+                    Picker("Code Input", selection: $codeInputStrategy) {
+                        Text("Simulated").tag(CodeInputStrategy.simulated)
+                        Text("Exact Insert").tag(CodeInputStrategy.exactInsert)
+                    }
+                    .pickerStyle(.segmented)
+                    .font(.subheadline)
+                    .help("Exact Insert pastes source as one block; it does not simulate typing.")
+
+                    if codeInputStrategy == .exactInsert {
+                        Text("Pastes source as a single block and restores the clipboard when possible. Destination editors may format pasted code. Draft 2/3 revisions still use simulated edits. Thinking Pauses and Simulate Mistakes do not affect the initial paste; Thinking Pauses still affect Draft 2/3 revisions.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Toggle("Thinking Pauses", isOn: $includeThinkingPauses)
+                    .font(.subheadline)
+                    .help("Add human-like delays after words, punctuation, and blank lines.")
+
+                Toggle("Simulate Mistakes", isOn: $simulateMistakes)
+                    .font(.subheadline)
+                    .help("Occasionally type an incorrect letter and correct it.")
+
+                if codeMode && codeInputStrategy == .simulated {
+                    Text("Preserves source whitespace. Disable auto-indent, auto-format and bracket completion in the target IDE when simulating typing.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
                 Toggle("Custom Typing Duration", isOn: $useTotalTime)
                     .font(.subheadline)
-                    .help("Override the estimated typing time with a specific duration")
+                    .disabled(codeMode && codeInputStrategy == .exactInsert)
+                    .help("Override the estimated typing time. Exact Insert cannot simulate a longer typing duration.")
 
                 VStack(alignment: .leading, spacing: 6) {
-                    if useTotalTime {
+                    if useTotalTime && !(codeMode && codeInputStrategy == .exactInsert) {
                         customDurationPicker
                     } else {
                         estimatedTimeText
@@ -1434,14 +1736,20 @@ struct ContentView: View {
     }
 
     private var estimatedTimeText: Text {
-        guard let minutes = estimatedMinutes else {
+        guard let seconds = estimatedTypingSeconds else {
             return Text("")
         }
 
         let prefix = Text("Estimated: at least ")
             .foregroundColor(.secondary)
 
-        let number = Text("\(minutes)m")
+        let duration: String
+        if codeMode || !includeThinkingPauses, seconds < 60 {
+            duration = "\(max(1, Int(ceil(seconds))))s"
+        } else {
+            duration = "\(max(1, Int(round(seconds / 60))))m"
+        }
+        let number = Text(duration)
             .bold()
             .foregroundColor(highlightEstimate ? .accentColor : .primary)
 
@@ -1453,7 +1761,9 @@ struct ContentView: View {
             return Text("")
         }
 
-        let estimate = formatDurationInFiveMinuteIncrements(editTime)
+        let estimate = (codeMode || !includeThinkingPauses)
+            ? formatDuration(editTime)
+            : formatDurationInFiveMinuteIncrements(editTime)
 
         let prefix = Text("Estimated: at least ")
             .foregroundColor(.secondary)
@@ -1465,29 +1775,16 @@ struct ContentView: View {
         return prefix + value
     }
 
-    private var estimatedMinutes: Int? {
-        let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let characterCount = trimmed.count
-
-        guard characterCount > 0 else {
-            return nil
+    private var estimatedTypingSeconds: TimeInterval? {
+        if codeMode && codeInputStrategy == .exactInsert && !inputText.isEmpty {
+            return 2 // A single paste; editor processing time may vary.
         }
-
-        // Match TypingManager: derive base typing time from WPM and character count,
-        // then add an equal amount of jitter (thinking pauses, commas, mistakes, etc.).
-        let wpm = max(1.0, targetWPM)
-        let charsPerMinute = max(5.0, wpm * 5.0)
-        let interCharacterDelay = 60.0 / charsPerMinute
-
-        let baseTypingTimeSeconds = Double(characterCount) * interCharacterDelay
-
-        let jitterMultiplier = 1.0
-        let estimatedJitterSeconds = baseTypingTimeSeconds * jitterMultiplier
-        let totalSeconds = baseTypingTimeSeconds + estimatedJitterSeconds
-
-        let minutes = totalSeconds / 60.0
-        let roundedMinutes = max(1, Int(round(minutes)))
-        return roundedMinutes
+        let characterCount = inputText.count
+        guard characterCount > 0 else { return nil }
+        let charactersPerMinute = max(5.0, targetWPM * 5.0)
+        let baseSeconds = Double(characterCount) * 60.0 / charactersPerMinute
+        // Prose keeps the existing rough jitter estimate; fast mode omits it.
+        return baseSeconds * (includeThinkingPauses ? 2.0 : 1.0)
     }
 
     private var desiredDurationSummary: String? {
@@ -1576,10 +1873,11 @@ struct ContentView: View {
     }
 
     private var estimatedDurationDescription: String {
-        guard let minutes = estimatedMinutes else {
-            return "—"
+        guard let seconds = estimatedTypingSeconds else { return "—" }
+        if codeMode || !includeThinkingPauses, seconds < 60 {
+            return "\(max(1, Int(ceil(seconds)))) second(s)"
         }
-        return "\(minutes) minute(s)"
+        return "\(max(1, Int(round(seconds / 60)))) minute(s)"
     }
 
     private var desiredDurationSeconds: TimeInterval? {
@@ -1631,6 +1929,8 @@ struct ContentView: View {
     }
 
     private func processInputText() {
+        // Formatting cleanup is destructive to code (indentation and blank lines).
+        guard !codeMode else { return }
         inputText = processText(inputText)
         if !inputTextDraft2.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             inputTextDraft2 = processText(inputTextDraft2)
@@ -1708,6 +2008,18 @@ struct ContentView: View {
     }
 
     private func handleAccessibilityOnAppear() {
+        if UIRegressionFixture.isRunning {
+            // UI tests must never request Accessibility permission or inject
+            // input into other processes. Set deterministic dimensions only.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                setWindowToDefaultSize()
+                if visibleDraftCount > 1 {
+                    adjustWindowForDraftCountChange()
+                }
+            }
+            return
+        }
+
         // Only run this once per launch so we don't nag if the view reloads.
         guard !hasShownAccessibilityAlert else { return }
         hasShownAccessibilityAlert = true
@@ -1941,6 +2253,19 @@ struct ContentView: View {
 
         pendingWindowAdjustment = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + windowAdjustmentDebounce, execute: workItem)
+    }
+
+    // Re-check the active build before starting, without changing the
+    // existing settings UI or competing with SwiftUI's Ready/Edit alerts.
+    private func showTypingAccessibilityRequiredAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Accessibility permission required"
+        alert.informativeText = "This running build of Watch Me Type needs Accessibility access to type into other apps. Enable it in System Settings > Privacy & Security > Accessibility, then try again."
+        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn {
+            AccessibilityPermissionHelper.requestIfNeeded()
+        }
     }
 
     private func showAccessibilityPreflightAlert() {

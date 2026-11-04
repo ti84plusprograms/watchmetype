@@ -70,6 +70,7 @@ final class TypingManager: NSObject, ObservableObject {
     @Published var lastEditingPhase2Duration: TimeInterval?
     @Published var progressFraction: Double = 0.0  // 0.0 = not started, 1.0 = complete
     @Published var lastEditingError: EditingError?  // Set when editing fails, cleared after handling
+    @Published var lastTypingStartError: String?  // Actionable error when no valid typing target is available
 
     private var countdownTimer: Timer?
     private var typingStartDate: Date?
@@ -79,7 +80,17 @@ final class TypingManager: NSObject, ObservableObject {
     private var textToType: [Character] = []
     private var currentIndex: Int = 0
     private var interCharacterDelay: TimeInterval = 0.05
-    
+    private var includeThinkingPauses: Bool = true
+    private var isCodeMode: Bool = false
+    private var codeInputStrategy: CodeInputStrategy = .simulated
+    private var preservedPasteboardItems: [NSPasteboardItem]?
+    private var insertedPasteboardChangeCount: Int?
+
+    // Keep the original prose insertion speed; allow faster code inserts.
+    private var editCharacterDelay: TimeInterval {
+        max(isCodeMode ? 0.03 : 0.05, interCharacterDelay)
+    }
+
     // Jitter / thinking state
     private var previousCharacter: Character?
     private var wordsSinceLastThinkingPause: Int = 0
@@ -180,9 +191,13 @@ final class TypingManager: NSObject, ObservableObject {
         wpm: Int,
         countdown: Int = 10,
         totalDurationSeconds: TimeInterval? = nil,
-        simulateMistakes: Bool = false
+        simulateMistakes: Bool = false,
+        includeThinkingPauses: Bool = true,
+        codeMode: Bool = false,
+        codeInputStrategy: CodeInputStrategy = .simulated
     ) {
         // Reset any existing timers/state
+        restorePasteboardIfUnchanged()
         countdownTimer?.invalidate()
         typingWorkItem?.cancel()
 
@@ -192,6 +207,9 @@ final class TypingManager: NSObject, ObservableObject {
         wordsSinceLastThinkingPause = 0
         wordsUntilNextThinkingPause = Int.random(in: 3...5)
         shouldSimulateMistakes = simulateMistakes
+        self.includeThinkingPauses = includeThinkingPauses
+        isCodeMode = codeMode
+        self.codeInputStrategy = codeMode ? codeInputStrategy : .simulated
         charactersTypedSinceLastMistake = 0
         nextMistakeInCharacters = Int.random(in: 50...75)
         extraDelayPerSentenceEnd = 0
@@ -201,6 +219,7 @@ final class TypingManager: NSObject, ObservableObject {
         stateBeforePause = nil
         typingStartDate = nil
         lastRunDuration = nil
+        lastTypingStartError = nil
         progressFraction = 0.0
 
         guard !textToType.isEmpty else {
@@ -220,7 +239,7 @@ final class TypingManager: NSObject, ObservableObject {
             // Rough estimate of extra time introduced by human-like jitter
             // (thinking pauses, commas, mistakes, etc.). This helps keep
             // the requested duration closer to reality.
-            let jitterMultiplier = 1.0
+            let jitterMultiplier = includeThinkingPauses ? 1.0 : 0.0
             let estimatedJitter = baseTypingTime * jitterMultiplier
             let baseWithJitter = baseTypingTime + estimatedJitter
 
@@ -267,6 +286,7 @@ final class TypingManager: NSObject, ObservableObject {
     }
     
     func stopTyping() {
+        restorePasteboardIfUnchanged()
         countdownTimer?.invalidate()
         countdownTimer = nil
 
@@ -311,16 +331,34 @@ final class TypingManager: NSObject, ObservableObject {
             return
         }
 
+        // macOS can treat an Xcode-run development build and a downloaded DMG
+        // as different Accessibility clients. Refuse to run silently when denied.
+        guard AccessibilityPermissionHelper.isTrusted else {
+            stopTyping()
+            lastTypingStartError = "Accessibility access is not granted to this running build. Open System Settings > Privacy & Security > Accessibility, enable Watch Me Type (the Xcode build, if listed separately), then restart and try again."
+            return
+        }
+
+        // At the moment typing begins, record the frontmost application as the
+        // target. Never silently send keystrokes to our own floating overlay.
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
+            stopTyping()
+            lastTypingStartError = "The destination application could not be detected. Start again, and click inside the document during the countdown."
+            return
+        }
+
+        guard frontmostApp.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            stopTyping()
+            lastTypingStartError = "Watch Me Type is still the active application. Start again, then click into the destination document before the countdown finishes."
+            return
+        }
+
         typingStartDate = Date()
         progressFraction = 0.0
-
-        // At the moment typing begins, record the current frontmost app and window
-        // as the intended typing target.
-        let frontmostApp = NSWorkspace.shared.frontmostApplication
-        targetAppPID = frontmostApp?.processIdentifier
+        targetAppPID = frontmostApp.processIdentifier
         targetWindowTitle = getFocusedWindowTitle()
 
-        appLog("Target app recorded - PID: \(targetAppPID ?? 0), name: '\(frontmostApp?.localizedName ?? "unknown")', window: '\(targetWindowTitle ?? "unknown")'", level: .debug)
+        appLog("Target app recorded - PID: \(targetAppPID ?? 0), name: '\(frontmostApp.localizedName ?? "unknown")', window: '\(targetWindowTitle ?? "unknown")'", level: .debug)
 
         state = .typing
         progressText = "Typing in progress…"
@@ -332,7 +370,11 @@ final class TypingManager: NSObject, ObservableObject {
         // Start periodic focus check (every 0.5 seconds) as safety net
         startPeriodicFocusCheck()
 
-        scheduleNextCharacter(after: interCharacterDelay)
+        if isCodeMode && codeInputStrategy == .exactInsert {
+            performExactCodeInsertion()
+        } else {
+            scheduleNextCharacter(after: interCharacterDelay)
+        }
     }
     
     private func scheduleNextCharacter(after delay: TimeInterval) {
@@ -393,7 +435,10 @@ final class TypingManager: NSObject, ObservableObject {
         sendCharacter(character)
         
         let extra = extraDelay(afterTyping: character)
-        let nextDelay = interCharacterDelay + extra
+        let baseDelay = isCodeMode
+            ? max(interCharacterDelay, CodeInputCore.minimumDelay(after: character))
+            : interCharacterDelay
+        let nextDelay = baseDelay + extra
         
         previousCharacter = character
         
@@ -505,6 +550,13 @@ final class TypingManager: NSObject, ObservableObject {
     
     private func pauseTyping() {
         guard state == .typing else { return }
+
+        // Exact Insert has already sent one atomic Paste event. Keep the
+        // scheduled clipboard-restoration completion even if focus changes.
+        if isCodeMode && codeInputStrategy == .exactInsert
+            && preservedPasteboardItems != nil {
+            return
+        }
 
         // Record what state we're pausing from (for correct resume)
         stateBeforePause = .typing
@@ -688,6 +740,22 @@ final class TypingManager: NSObject, ObservableObject {
     // MARK: - Jitter / thinking behaviour
     
     private func extraDelay(afterTyping character: Character) -> TimeInterval {
+        // No random word, punctuation or paragraph pauses when thinking is off.
+        // An explicit custom minimum duration may still add deliberate delays.
+        if !includeThinkingPauses {
+            var requestedExtra: TimeInterval = 0
+            if ".?!;:".contains(character) {
+                requestedExtra += extraDelayPerSentenceEnd
+            }
+            if character == "\n", previousCharacter == "\n" {
+                requestedExtra += extraDelayPerParagraphBreak
+            }
+            DispatchQueue.main.async {
+                self.isThinking = requestedExtra >= 0.8
+            }
+            return requestedExtra
+        }
+
         var extra: TimeInterval = 0
         
         if character.isWhitespace {
@@ -792,6 +860,89 @@ final class TypingManager: NSObject, ObservableObject {
     
     // MARK: - Event sending
     
+    // MARK: - Exact Code Insertion
+
+    /// Opt-in Paste, rather than per-character Return and indentation events.
+    /// Some IDEs may still format text on paste.
+    private func performExactCodeInsertion() {
+        guard state == .typing, isTargetWindowFocused() else {
+            stopTyping()
+            lastTypingStartError = "The destination editor lost focus before exact insertion."
+            return
+        }
+
+        let pasteboard = NSPasteboard.general
+        var preserved: [NSPasteboardItem] = []
+
+        // Preserve every readable clipboard representation without logging data.
+        for item in pasteboard.pasteboardItems ?? [] {
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                guard let data = item.data(forType: type) else {
+                    stopTyping()
+                    lastTypingStartError = "The clipboard contains an item that cannot be preserved. Try Simulated Typing."
+                    return
+                }
+                copy.setData(data, forType: type)
+            }
+            preserved.append(copy)
+        }
+        preservedPasteboardItems = preserved
+
+        pasteboard.clearContents()
+        guard pasteboard.setString(String(textToType), forType: .string) else {
+            restorePasteboardIfUnchanged(force: true)
+            stopTyping()
+            lastTypingStartError = "Unable to prepare the clipboard for exact insertion."
+            return
+        }
+        insertedPasteboardChangeCount = pasteboard.changeCount
+
+        // Standard macOS Command+V. The target editor decides how Paste behaves.
+        let source = CGEventSource(stateID: .hidSystemState)
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) else {
+            restorePasteboardIfUnchanged()
+            stopTyping()
+            lastTypingStartError = "Unable to create the Paste keyboard event."
+            return
+        }
+        down.flags = .maskCommand
+        up.flags = .maskCommand
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+
+        // Allow the IDE to read Paste before restoring the user's clipboard.
+        // A clipboard change made by another app is never overwritten.
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            self.restorePasteboardIfUnchanged()
+            guard self.state == .typing else { return }
+            self.currentIndex = self.textToType.count
+            self.progressFraction = 1
+            self.finishTyping()
+        }
+        typingWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: workItem)
+    }
+
+    private func restorePasteboardIfUnchanged(force: Bool = false) {
+        guard let preserved = preservedPasteboardItems else { return }
+        let pasteboard = NSPasteboard.general
+        if force || (insertedPasteboardChangeCount != nil
+                     && pasteboard.changeCount == insertedPasteboardChangeCount) {
+            pasteboard.clearContents()
+            if !preserved.isEmpty && !pasteboard.writeObjects(preserved) {
+                // The original clipboard was already cleared above, so a failed
+                // restore is data loss, not a silent no-op. Log it, don't log
+                // the clipboard contents themselves.
+                appLog("Failed to restore the preserved clipboard after exact insertion", level: .error)
+            }
+        }
+        preservedPasteboardItems = nil
+        insertedPasteboardChangeCount = nil
+    }
+
     private func sendCharacter(_ character: Character) {
         let source = CGEventSource(stateID: .hidSystemState)
 
@@ -1032,14 +1183,22 @@ final class TypingManager: NSObject, ObservableObject {
 
     /// Estimates the editing time for transforming draft1 into draft2 at the given WPM
     /// This can be called before starting to provide a preview estimate
-    func estimateEditingTime(draft1: String, draft2: String, wpm: Int) -> TimeInterval {
+    func estimateEditingTime(
+        draft1: String,
+        draft2: String,
+        wpm: Int,
+        includeThinkingPauses: Bool = true,
+        codeMode: Bool = false
+    ) -> TimeInterval {
         // If drafts are identical, no editing needed
         if draft1 == draft2 {
             return 0
         }
 
-        // Compute the edit operations
-        let edits = convertDraftsToPositionedEdits(draft1: draft1, draft2: draft2)
+        // Never run sentence-based prose heuristics on code.
+        let edits = codeMode
+            ? convertCodeDraftsToPositionedEdits(draft1: draft1, draft2: draft2)
+            : convertDraftsToPositionedEdits(draft1: draft1, draft2: draft2)
 
         if edits.isEmpty {
             return 0
@@ -1055,7 +1214,7 @@ final class TypingManager: NSObject, ObservableObject {
         let deleteDelay = 0.1 * delayMultiplier
         let postDeleteDelay = 0.3 * delayMultiplier
         let postInsertDelay = 0.3 * delayMultiplier
-        let baseCharDelay = max(0.05, baseInterCharDelay) * delayMultiplier
+        let baseCharDelay = max(codeMode ? 0.03 : 0.05, baseInterCharDelay) * delayMultiplier
 
         var totalTime: TimeInterval = 0
         var simulatedCursorPos = draft1.count // Start at end of draft1
@@ -1080,7 +1239,9 @@ final class TypingManager: NSObject, ObservableObject {
                 let charCount = text.count
                 totalTime += Double(charCount) * baseCharDelay
                 // Add estimated jitter based on actual text content
-                totalTime += estimateTextJitter(text) * delayMultiplier
+                if includeThinkingPauses {
+                    totalTime += estimateTextJitter(text) * delayMultiplier
+                }
                 totalTime += postInsertDelay
                 simulatedCursorPos = edit.position + text.count
 
@@ -1091,7 +1252,9 @@ final class TypingManager: NSObject, ObservableObject {
                 let charCount = newText.count
                 totalTime += Double(charCount) * baseCharDelay
                 // Add estimated jitter based on actual text content
-                totalTime += estimateTextJitter(newText) * delayMultiplier
+                if includeThinkingPauses {
+                    totalTime += estimateTextJitter(newText) * delayMultiplier
+                }
                 totalTime += postInsertDelay
                 simulatedCursorPos = edit.position + newText.count
 
@@ -1117,7 +1280,10 @@ final class TypingManager: NSObject, ObservableObject {
         typingDuration: TimeInterval? = nil,
         editingDuration: TimeInterval? = nil,
         editingDuration2: TimeInterval? = nil,
-        simulateMistakes: Bool = false
+        simulateMistakes: Bool = false,
+        includeThinkingPauses: Bool = true,
+        codeMode: Bool = false,
+        codeInputStrategy: CodeInputStrategy = .simulated
     ) {
         self.draft2Text = draft2
         self.customEditingDuration = editingDuration
@@ -1129,7 +1295,10 @@ final class TypingManager: NSObject, ObservableObject {
             wpm: wpm,
             countdown: countdown,
             totalDurationSeconds: typingDuration,
-            simulateMistakes: simulateMistakes
+            simulateMistakes: simulateMistakes,
+            includeThinkingPauses: includeThinkingPauses,
+            codeMode: codeMode,
+            codeInputStrategy: codeInputStrategy
         )
     }
 
@@ -1148,7 +1317,9 @@ final class TypingManager: NSObject, ObservableObject {
         appLog("Starting backwards editing - Draft 1: \(draft1.count) chars, Draft 2: \(draft2.count) chars", level: .info)
 
         // Step 1: Compute positioned edits (sorted right-to-left)
-        positionedEdits = convertDraftsToPositionedEdits(draft1: draft1, draft2: draft2)
+        positionedEdits = isCodeMode
+            ? convertCodeDraftsToPositionedEdits(draft1: draft1, draft2: draft2)
+            : convertDraftsToPositionedEdits(draft1: draft1, draft2: draft2)
         appLog("Generated \(positionedEdits.count) positioned edits", level: .debug)
 
         // Step 2: Initialize editing state
@@ -1187,7 +1358,7 @@ final class TypingManager: NSObject, ObservableObject {
     /// Estimates the jitter time for typing a given text string
     /// This mirrors the extraDelay(afterTyping:) logic to provide accurate estimates
     private func estimateTextJitter(_ text: String) -> TimeInterval {
-        guard !text.isEmpty else { return 0 }
+        guard includeThinkingPauses, !text.isEmpty else { return 0 }
 
         var totalJitter: TimeInterval = 0
         let chars = Array(text)
@@ -1237,7 +1408,7 @@ final class TypingManager: NSObject, ObservableObject {
         let deleteDelay = 0.1 * editingDelayMultiplier
         let postDeleteDelay = 0.3 * editingDelayMultiplier
         let postInsertDelay = 0.3 * editingDelayMultiplier
-        let baseCharDelay = max(0.05, interCharacterDelay) * editingDelayMultiplier
+        let baseCharDelay = editCharacterDelay * editingDelayMultiplier
 
         var simulatedCursorPos = textToType.count // Start cursor at end of typed text (draft1)
 
@@ -1461,7 +1632,7 @@ final class TypingManager: NSObject, ObservableObject {
 
         case .insert(let text):
             appLog("Inserting '\(text.prefix(20))\(text.count > 20 ? "..." : "")'", level: .debug)
-            let baseDelay = max(0.05, interCharacterDelay)
+            let baseDelay = editCharacterDelay
             let delay = baseDelay * editingDelayMultiplier
             sendCharactersWithDelay(text, delay: delay) { [weak self] in
                 guard let self = self, self.state == .editing else { return }
@@ -1512,7 +1683,7 @@ final class TypingManager: NSObject, ObservableObject {
         let backspaceDelay = 0.1 * editingDelayMultiplier
         let postDeleteDelay = 0.2 * editingDelayMultiplier
         let postInsertDelay = 0.3 * editingDelayMultiplier
-        let baseDelay = max(0.05, interCharacterDelay) * editingDelayMultiplier
+        let baseDelay = editCharacterDelay * editingDelayMultiplier
 
         // Insert the new text AFTER deleting the old text.
         let performInsert: () -> Void = { [weak self] in
@@ -1700,7 +1871,9 @@ final class TypingManager: NSObject, ObservableObject {
         previousCharacter = editCharPreviousChar
 
         // Calculate delay using the same extraDelay logic as typing phase
-        let baseDelay = max(0.05, interCharacterDelay)
+        let baseDelay = isCodeMode
+            ? max(editCharacterDelay, CodeInputCore.minimumDelay(after: character))
+            : editCharacterDelay
         let extra = extraDelay(afterTyping: character)
         let nextDelay = (baseDelay + extra) * editingDelayMultiplier
 
@@ -1824,7 +1997,9 @@ final class TypingManager: NSObject, ObservableObject {
 
         appLog("Starting forward editing - Draft 2: \(draft2.count) chars, Draft 3: \(draft3.count) chars, cursor at \(actualCursorPosition)", level: .info)
 
-        positionedEdits = convertDraftsToPositionedEdits(draft1: draft2, draft2: draft3, direction: .leftToRight)
+        positionedEdits = isCodeMode
+            ? convertCodeDraftsToPositionedEdits(draft1: draft2, draft2: draft3)
+            : convertDraftsToPositionedEdits(draft1: draft2, draft2: draft3, direction: .leftToRight)
         appLog("Generated \(positionedEdits.count) forward edits", level: .debug)
 
         progressText = "Editing Draft 2 into Draft 3..."

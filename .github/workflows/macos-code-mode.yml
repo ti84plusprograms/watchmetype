@@ -1,0 +1,181 @@
+name: macOS build and code-core tests
+
+on:
+  push:
+    branches: [feature/code-mode]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Compile app and test code input
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Select supported Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d /Applications/Xcode_26.3.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
+          xcodebuild -version
+          swift --version
+
+      - name: Record run provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-evidence
+          {
+            echo "repository=${{ github.repository }}"
+            echo "commit=${{ github.sha }}"
+            echo "checkout=$(git rev-parse HEAD)"
+            echo "ref=${{ github.ref }}"
+            echo "event=${{ github.event_name }}"
+            echo "run_id=${{ github.run_id }}"
+            echo "attempt=${{ github.run_attempt }}"
+            echo "runner_image=$ImageOS $ImageVersion"
+            xcodebuild -version
+            swift --version
+          } | tee ci-evidence/provenance.txt
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+
+      - name: Run code-core regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          swift test --package-path . 2>&1 | tee ci-evidence/swift-test.log
+
+      - name: Compile macOS application (no signing or redistribution)
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project "Watch Me Type.xcodeproj" \
+            -scheme "Watch Me Type" \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/watchmetype-derived-data" \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            build 2>&1 | tee ci-evidence/xcodebuild.log
+
+      - name: Generate auditable evidence manifest
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-evidence
+          {
+            echo "commit=${{ github.sha }}"
+            echo "run_id=${{ github.run_id }}"
+            echo "run_attempt=${{ github.run_attempt }}"
+            echo "job_status=${{ job.status }}"
+          } > ci-evidence/result.txt
+          (cd ci-evidence && shasum -a 256 *.txt *.log 2>/dev/null || true) > ci-evidence/SHA256SUMS
+          {
+            echo "### Code Mode CI"
+            echo "- Commit: \`${{ github.sha }}\`"
+            echo "- Run: ${{ github.run_id }} / attempt ${{ github.run_attempt }}"
+            echo "- Status: ${{ job.status }}"
+            echo "- Scope: SwiftPM core regression tests + unsigned macOS compile"
+            echo "- Evidence: provenance, console logs, and SHA-256 manifest"
+            echo "- No signed or distributable binary is produced."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build and test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-mode-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+  ui-test:
+    name: Capture macOS Code Mode UI screenshots
+    needs: verify
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d /Applications/Xcode_26.3.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
+          xcodebuild -version
+          echo "commit=${{ github.sha }}"
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+
+      - name: Run real macOS UI tests and collect xcresult
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Keep the Dock from obscuring the bottom of captured windows.
+          defaults write com.apple.dock autohide -bool true
+          killall Dock || true
+          mkdir -p ui-test-evidence
+          xcodebuild \
+            -project "Watch Me Type.xcodeproj" \
+            -scheme "Watch Me Type" \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/watchmetype-ui-derived" \
+            -resultBundlePath "$RUNNER_TEMP/watchmetype-ui.xcresult" \
+            -parallel-testing-enabled NO \
+            -only-testing:WatchMeTypeUITests \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            test 2>&1 | tee ui-test-evidence/xcodebuild-ui-tests.log
+
+      - name: Export retained screenshots from xcresult
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ui-test-evidence/screenshots
+          if [ -d "$RUNNER_TEMP/watchmetype-ui.xcresult" ]; then
+            xcrun xcresulttool export attachments \
+              --path "$RUNNER_TEMP/watchmetype-ui.xcresult" \
+              --output-path ui-test-evidence/screenshots \
+              2>&1 | tee ui-test-evidence/screenshot-export.log || true
+          fi
+          {
+            echo "commit=${{ github.sha }}"
+            echo "run=${{ github.run_id }}"
+            echo "attempt=${{ github.run_attempt }}"
+            echo "test_job_status=${{ job.status }}"
+            echo "runner=$ImageOS $ImageVersion"
+            xcodebuild -version
+          } > ui-test-evidence/provenance.txt
+          (cd ui-test-evidence && shasum -a 256 *.txt *.log 2>/dev/null || true) > ui-test-evidence/SHA256SUMS
+
+      - name: Upload screenshots and test evidence (even on failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-mode-ui-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ui-test-evidence/
+            ${{ runner.temp }}/watchmetype-ui.xcresult/
+          if-no-files-found: warn
+          retention-days: 14

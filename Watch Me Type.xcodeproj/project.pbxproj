@@ -15,12 +15,18 @@
 		D03BF2582F1070D50092CD67 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		D057C7022F247409001288B2 /* *.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "*.entitlements"; sourceTree = "<group>"; };
 		D0C2C4AF2EE01E0300F56072 /* Watch Me Type.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Watch Me Type.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000003 /* WatchMeTypeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WatchMeTypeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		D0C2C4B12EE01E0300F56072 /* Watch Me Type */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "Watch Me Type";
+			sourceTree = "<group>";
+		};
+		A10000000000000000000002 /* WatchMeTypeUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = WatchMeTypeUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -31,6 +37,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				D057C7052F2488A9001288B2 /* Sparkle in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000005 /* Frameworks (UI tests) */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -50,6 +63,7 @@
 				D057C7022F247409001288B2 /* *.entitlements */,
 				D03BF2582F1070D50092CD67 /* Localizable.xcstrings */,
 				D0C2C4B12EE01E0300F56072 /* Watch Me Type */,
+				A10000000000000000000002 /* WatchMeTypeUITests */,
 				D057C6FF2F24535E001288B2 /* Frameworks */,
 				D0C2C4B02EE01E0300F56072 /* Products */,
 			);
@@ -59,6 +73,7 @@
 			isa = PBXGroup;
 			children = (
 				D0C2C4AF2EE01E0300F56072 /* Watch Me Type.app */,
+				A10000000000000000000003 /* WatchMeTypeUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -89,7 +104,38 @@
 			productReference = D0C2C4AF2EE01E0300F56072 /* Watch Me Type.app */;
 			productType = "com.apple.product-type.application";
 		};
+		A10000000000000000000001 /* WatchMeTypeUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000009 /* Build configuration list for PBXNativeTarget "WatchMeTypeUITests" */;
+			buildPhases = (
+				A10000000000000000000004 /* Sources */,
+				A10000000000000000000005 /* Frameworks */,
+				A10000000000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A1000000000000000000000A /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000002 /* WatchMeTypeUITests */,
+			);
+			name = WatchMeTypeUITests;
+			productName = WatchMeTypeUITests;
+			productReference = A10000000000000000000003 /* WatchMeTypeUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXContainerItemProxy section */
+		A1000000000000000000000B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D0C2C4A72EE01E0300F56072 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D0C2C4AE2EE01E0300F56072;
+			remoteInfo = "Watch Me Type";
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXProject section */
 		D0C2C4A72EE01E0300F56072 /* Project object */ = {
@@ -101,6 +147,10 @@
 				TargetAttributes = {
 					D0C2C4AE2EE01E0300F56072 = {
 						CreatedOnToolsVersion = 26.1.1;
+					};
+					A10000000000000000000001 = {
+						CreatedOnToolsVersion = 26.3;
+						TestTargetID = D0C2C4AE2EE01E0300F56072;
 					};
 				};
 			};
@@ -124,6 +174,7 @@
 			projectRoot = "";
 			targets = (
 				D0C2C4AE2EE01E0300F56072 /* Watch Me Type */,
+				A10000000000000000000001 /* WatchMeTypeUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -137,10 +188,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000000000000000000006 /* Resources (UI tests) */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		D0C2C4AB2EE01E0300F56072 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000004 /* Sources (UI tests) */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -390,6 +455,34 @@
 			};
 			name = Release;
 		};
+		A10000000000000000000007 /* Debug (UI tests) */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ti84plusprograms.watchmetype.uitests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = "Watch Me Type";
+			};
+			name = Debug;
+		};
+		A10000000000000000000008 /* Release (UI tests) */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.ti84plusprograms.watchmetype.uitests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = "Watch Me Type";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -411,7 +504,24 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		A10000000000000000000009 /* Build configuration list for PBXNativeTarget "WatchMeTypeUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000000000000000000007 /* Debug */,
+				A10000000000000000000008 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin PBXTargetDependency section */
+		A1000000000000000000000A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D0C2C4AE2EE01E0300F56072 /* Watch Me Type */;
+			targetProxy = A1000000000000000000000B /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCRemoteSwiftPackageReference section */
 		D057C7032F2488A9001288B2 /* XCRemoteSwiftPackageReference "Sparkle" */ = {

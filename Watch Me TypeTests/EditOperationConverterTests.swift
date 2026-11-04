@@ -432,6 +432,60 @@ final class EditOperationConverterTests: XCTestCase {
         XCTAssertTrue(ltrEdits.isEmpty, "Identical drafts should produce no edits")
     }
 
+    // MARK: - Mode-Specific Typing Speed UX Tests
+
+    func testNormalModeKeepsOriginalWPMRange() {
+        XCTAssertEqual(TypingSpeedPolicy.range(forCodeMode: false), 40.0...120.0)
+    }
+
+    func testCodeModeUsesExpandedWPMRange() {
+        XCTAssertEqual(TypingSpeedPolicy.range(forCodeMode: true), 40.0...400.0)
+    }
+
+    func testSwitchingToCodeModePreservesNumericSpeed() {
+        XCTAssertEqual(TypingSpeedPolicy.adjusted(120, forCodeMode: true), 120)
+        XCTAssertEqual(TypingSpeedPolicy.adjusted(80, forCodeMode: true), 80)
+        // The same numeric speed sits closer to the left on the wider scale.
+        let prose = TypingSpeedPolicy.range(forCodeMode: false)
+        let code = TypingSpeedPolicy.range(forCodeMode: true)
+        let prosePosition = (120.0 - prose.lowerBound) / (prose.upperBound - prose.lowerBound)
+        let codePosition = (120.0 - code.lowerBound) / (code.upperBound - code.lowerBound)
+        XCTAssertEqual(prosePosition, 1.0)
+        XCTAssertLessThan(codePosition, prosePosition)
+    }
+
+    func testSwitchingBackToNormalClampsHighCodeSpeed() {
+        XCTAssertEqual(TypingSpeedPolicy.adjusted(350, forCodeMode: false), 120)
+        XCTAssertEqual(TypingSpeedPolicy.adjusted(400, forCodeMode: false), 120)
+        XCTAssertEqual(TypingSpeedPolicy.adjusted(100, forCodeMode: false), 100)
+    }
+
+    func testSwitchingBackToCodeDoesNotRestoreStaleHighSpeed() {
+        let normal = TypingSpeedPolicy.adjusted(350, forCodeMode: false)
+        XCTAssertEqual(TypingSpeedPolicy.adjusted(normal, forCodeMode: true), 120)
+    }
+
+    // MARK: - Code Formatting Regression Tests
+
+    func testCodeTokensRoundTripExactWhitespace() {
+        let code = "def greet(name):\n    if name:\n        print(name)\n\n\treturn True\n"
+        XCTAssertEqual(tokenizeIntoWords(code).joined(), code)
+    }
+
+    func testCodeRevisionPreservesIndentationAndTrailingNewlines() {
+        let first = "def value(x):\n    return x + 1\n\n"
+        let second = "def value(x):\n    return x + 2\n\n"
+        let edits = convertDraftsToPositionedEdits(draft1: first, draft2: second)
+        XCTAssertEqual(applyEdits(to: first, edits: edits), second)
+    }
+
+    func testCodeRevisionWithTabsAndBlankLines() {
+        let first = "value = 1\n\n\tprint(value)\n"
+        let second = "value = 1\n\n\tprint(value + 1)\n"
+        let edits = convertDraftsToPositionedEdits(draft1: first, draft2: second)
+        XCTAssertEqual(applyEdits(to: first, edits: edits), second)
+    }
+
     // MARK: - Helper Functions
 
     /// Applies edits to text to verify correctness

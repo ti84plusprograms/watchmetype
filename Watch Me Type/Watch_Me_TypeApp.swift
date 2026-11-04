@@ -12,6 +12,9 @@ struct Watch_Me_TypeApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                // The forced Dark Mode is available only to explicitly
+                // flagged UI-test launches; ordinary app appearance is unchanged.
+                .preferredColorScheme(UIRegressionFixture.forceDarkAppearance ? .dark : nil)
         }
         .defaultSize(width: 1000, height: 840)
     }
