@@ -125,10 +125,14 @@ enum PythonSyntaxHighlighter {
                 let triple = quotePosition + 2 < count
                     && units[quotePosition + 1] == quote
                     && units[quotePosition + 2] == quote
+                // In a raw string a backslash does not escape the next character.
+                // Treating it as an escape swallowed the closing quote of e.g.
+                // r"a\" and merged the following code into the string token.
+                let isRaw = units[start..<quotePosition].contains { $0 == 114 || $0 == 82 }
                 position = quotePosition + (triple ? 3 : 1)
 
                 while position < count {
-                    if units[position] == 92 { // Backslash escapes the next unit.
+                    if !isRaw && units[position] == 92 { // Backslash escapes the next unit.
                         position = min(position + 2, count)
                         continue
                     }

@@ -47,6 +47,22 @@ final class PythonSyntaxHighlighterTests: XCTestCase {
         XCTAssertFalse(tokens.contains { $0.1 == .comment })
     }
 
+    func testRawStringsDoNotEscapeClosingQuote() {
+        // In a raw string a backslash does not escape the next character.
+        // The old lexer skipped the closing quote and merged the next token
+        // into the same string highlight.
+        let source = "a = r\"x\\\" + \"y\"\n"
+        let tokens = entries(in: source)
+        XCTAssertTrue(tokens.contains { $0.0 == "r\"x\\\"" && $0.1 == .string })
+        XCTAssertTrue(tokens.contains { $0.0 == "\"y\"" && $0.1 == .string })
+        XCTAssertEqual(tokens.filter { $0.1 == .string }.count, 2)
+
+        let path = "p = r\"C:\\new\\file\"\n"
+        let pathTokens = entries(in: path)
+        XCTAssertTrue(pathTokens.contains { $0.0 == "r\"C:\\new\\file\"" && $0.1 == .string })
+        XCTAssertEqual(pathTokens.filter { $0.1 == .string }.count, 1)
+    }
+
     func testDecoratorsClassesAndNumbers() {
         let source = "@dataclass\nclass Point:\n    x = 3.14\n    y = 1e-3\n"
         let tokens = entries(in: source)

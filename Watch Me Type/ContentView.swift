@@ -1117,7 +1117,7 @@ struct ContentView: View {
                     .help("Exact Insert pastes source as one block; it does not simulate typing.")
 
                     if codeInputStrategy == .exactInsert {
-                        Text("Pastes source as a single block and restores the clipboard when possible. Destination editors may format pasted code. Draft 2/3 revisions still use simulated edits.")
+                        Text("Pastes source as a single block and restores the clipboard when possible. Destination editors may format pasted code. Draft 2/3 revisions still use simulated edits. Thinking Pauses and Simulate Mistakes do not affect the initial paste; Thinking Pauses still affect Draft 2/3 revisions.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }

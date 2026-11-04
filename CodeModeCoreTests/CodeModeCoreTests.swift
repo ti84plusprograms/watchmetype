@@ -63,6 +63,21 @@ final class CodeModeCoreTests: XCTestCase {
         XCTAssertEqual(apply(CodeInputCore.changedLineRegion(from: old, to: new), to: old), new)
     }
 
+    func testClassicMacAndMixedLineEndings() {
+        // CR-only text previously collapsed to a single line, so any change
+        // became a whole-file replacement.
+        let oldCR = "a\rb\rc\r"
+        let newCR = "a\rb\rd\r"
+        XCTAssertEqual(CodeInputCore.linesPreservingTerminators(oldCR), ["a\r", "b\r", "c\r"])
+        XCTAssertEqual(CodeInputCore.linesPreservingTerminators(oldCR).joined(), oldCR)
+        XCTAssertEqual(apply(CodeInputCore.changedLineRegion(from: oldCR, to: newCR), to: oldCR), newCR)
+
+        let mixed = "a\r\nb\rc\n"
+        XCTAssertEqual(CodeInputCore.linesPreservingTerminators(mixed), ["a\r\n", "b\r", "c\n"])
+        XCTAssertEqual(CodeInputCore.linesPreservingTerminators(mixed).joined(), mixed)
+        XCTAssertEqual(CodeInputCore.linesPreservingTerminators("a\n\n"), ["a\n", "\n"])
+    }
+
     func testLineCountWithUnixWindowsAndClassicMacLineEndings() {
         XCTAssertEqual(CodeInputCore.lineCount(in: ""), 0)
         XCTAssertEqual(CodeInputCore.lineCount(in: "def f():\n    pass\n"), 3)

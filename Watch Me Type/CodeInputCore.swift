@@ -19,13 +19,37 @@ struct CodeLineReplacement: Equatable {
 
 enum CodeInputCore {
     /// Keep the original newline characters, trailing newline, and empty lines.
+    /// Splits on LF, CRLF, and CR-only terminators. The previous implementation
+    /// split only on "\n", so a CR-only file was treated as a single line and
+    /// any change produced one whole-file replacement instead of a line change.
+    /// Splitting on UTF-16 units is safe here: CR (13) and LF (10) never occur
+    /// inside a surrogate pair, so no multi-unit character is split.
     static func linesPreservingTerminators(_ text: String) -> [String] {
         guard !text.isEmpty else { return [] }
-        let parts = text.components(separatedBy: "\n")
-        return parts.enumerated().compactMap { index, part in
-            if index < parts.count - 1 { return part + "\n" }
-            return part.isEmpty ? nil : part
+        let units = Array(text.utf16)
+        var lines: [String] = []
+        var start = 0
+        var index = 0
+        while index < units.count {
+            if units[index] == 13 {
+                // CR, or CRLF as a single terminator.
+                var end = index + 1
+                if end < units.count && units[end] == 10 { end += 1 }
+                lines.append(String(decoding: units[start..<end], as: UTF16.self))
+                index = end
+                start = end
+            } else if units[index] == 10 {
+                lines.append(String(decoding: units[start..<(index + 1)], as: UTF16.self))
+                index += 1
+                start = index
+            } else {
+                index += 1
+            }
         }
+        if start < units.count {
+            lines.append(String(decoding: units[start..<units.count], as: UTF16.self))
+        }
+        return lines
     }
 
     /// Produce one safe, line-aligned replacement spanning the changed region.

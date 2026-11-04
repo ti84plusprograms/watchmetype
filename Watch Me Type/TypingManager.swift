@@ -932,7 +932,12 @@ final class TypingManager: NSObject, ObservableObject {
         if force || (insertedPasteboardChangeCount != nil
                      && pasteboard.changeCount == insertedPasteboardChangeCount) {
             pasteboard.clearContents()
-            if !preserved.isEmpty { _ = pasteboard.writeObjects(preserved) }
+            if !preserved.isEmpty && !pasteboard.writeObjects(preserved) {
+                // The original clipboard was already cleared above, so a failed
+                // restore is data loss, not a silent no-op. Log it, don't log
+                // the clipboard contents themselves.
+                appLog("Failed to restore the preserved clipboard after exact insertion", level: .error)
+            }
         }
         preservedPasteboardItems = nil
         insertedPasteboardChangeCount = nil
