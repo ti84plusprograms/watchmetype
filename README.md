@@ -154,13 +154,15 @@ XCUITest suite; external Accessibility injection still requires manual tests.
 ### Automated macOS UI testing
 
 An XCUITest target named `WatchMeTypeUITests` is included in the shared
-Watch Me Type scheme. Eight scenarios test empty and multiline Python,
+Watch Me Type scheme. Nine scenarios test empty and multiline Python (light and dark),
 long lines, scrolling, Code Mode/Normal Mode switching, and two/three drafts.
 The tests launch the actual GUI and retain a window screenshot for each case.
 
 Fixture state is enabled **only** by the `--wmt-ui-tests` app launch argument;
 `WMT_UI_FIXTURE` accepts `empty`, `python`, `wrapped`, `scroll`, `normal`,
-`two-drafts`, or `three-drafts`. Normal launches keep the original blank state.
+`two-drafts`, or `three-drafts`. Setting `WMT_UI_APPEARANCE=dark` forces
+Dark Mode only for an explicitly marked test launch. Normal launches keep
+the original blank state and follow system appearance.
 Test mode skips Accessibility onboarding and disables Start, so it cannot
 issue synthetic typing or clipboard insertion into external apps.
 
