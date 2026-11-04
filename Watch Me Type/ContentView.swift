@@ -1072,6 +1072,7 @@ struct ContentView: View {
                 .fill(Color.secondary.opacity(0.08))
         )
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("codeFormattingNotice")
     }
 
     @ViewBuilder
