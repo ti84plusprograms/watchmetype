@@ -962,21 +962,6 @@ final class TypingManager: NSObject, ObservableObject {
         insertedPasteboardChangeCount = nil
     }
 
-    /// Send the normal Return keystroke.
-    private func sendReturnKey() {
-        let source = CGEventSource(stateID: .hidSystemState)
-        let returnKeyCode: CGKeyCode = 0x24 // kVK_Return
-        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: returnKeyCode, keyDown: true),
-              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: returnKeyCode, keyDown: false) else {
-            appLog("Unable to create Return keyboard event", level: .error)
-            return
-        }
-        keyDown.flags = []
-        keyUp.flags = []
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
-    }
-
     /// Dismiss IDE completion before Return, so Enter cannot accept a suggestion
     /// instead of creating a newline. No IDE preferences are modified.
     private func sendCodeModeNewline() {
