@@ -123,8 +123,9 @@ code; 350 code → 120 prose). The slider thumb moves to the appropriate relativ
 position. Thinking and mistake preferences remain independent per mode.
 
 **Code Mode** sends the supplied source text without running the Clean-Up
-processor. Its Clean-Up panel is disabled to protect indentation, tabs, blank
-lines, and trailing whitespace. Normal prose cleanup remains available.
+processor. Code Mode displays a compact formatting notice in place of
+Clean-Up controls, protecting indentation, tabs and blank lines. Normal
+prose cleanup remains available.
 
 ### Python-first code editor
 
@@ -146,11 +147,47 @@ f-string interpolation and arbitrary-language detection are not implemented.
 Non-Python code remains unmodified but may receive misleading Python colors;
 for now the language indicator explicitly says **PYTHON**.
 
-The SwiftPM test target runs regression cases for Unicode UTF-16 highlight
-ranges, quoted hash characters, triple-quoted strings, decorators, escapes,
-and untouched source text. GitHub Actions also compiles the AppKit UI; it does
-not test actual interaction, scrolling or macOS Accessibility behavior, which
-must be verified in Xcode.
+The SwiftPM tests cover lexer ranges and text-preservation behavior. The
+macOS CI compiles the AppKit UI and runs a separate screenshot-producing
+XCUITest suite; external Accessibility injection still requires manual tests.
+
+### Automated macOS UI testing
+
+An XCUITest target named `WatchMeTypeUITests` is included in the shared
+Watch Me Type scheme. Eight scenarios test empty and multiline Python,
+long lines, scrolling, Code Mode/Normal Mode switching, and two/three drafts.
+The tests launch the actual GUI and retain a window screenshot for each case.
+
+Fixture state is enabled **only** by the `--wmt-ui-tests` app launch argument;
+`WMT_UI_FIXTURE` accepts `empty`, `python`, `wrapped`, `scroll`, `normal`,
+`two-drafts`, or `three-drafts`. Normal launches keep the original blank state.
+Test mode skips Accessibility onboarding and disables Start, so it cannot
+issue synthetic typing or clipboard insertion into external apps.
+
+Run on an unlocked Mac with Xcode selected, from the repository root:
+
+```bash
+xcodebuild test \
+  -project "Watch Me Type.xcodeproj" \
+  -scheme "Watch Me Type" \
+  -configuration Debug \
+  -destination 'platform=macOS' \
+  -parallel-testing-enabled NO \
+  -only-testing:WatchMeTypeUITests \
+  -resultBundlePath "$PWD/CodeModeUITests.xcresult"
+
+xcrun xcresulttool export attachments \
+  --path "$PWD/CodeModeUITests.xcresult" \
+  --output-path "$PWD/CodeModeUITestScreenshots"
+```
+
+Use a new `.xcresult` path for each run. CI uploads screenshots, the result
+bundle, and logs even on UI-test failure. These tests check accessibility
+elements and text values but cannot independently prove that pixels are
+correct: **inspect screenshots** for visible code, caret, headers, and gutters.
+No reference-image baseline or pixel diff is enabled. GitHub-hosted macOS
+runners may lack usable interactive GUI automation; in that case use a
+local unlocked Mac or an authorized self-hosted macOS runner.
 
 **Code Input** uses an extra compact control inside the existing Typing Speed
 card. **Simulated** types characters individually (with a longer pause after
