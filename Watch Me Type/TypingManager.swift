@@ -118,59 +118,139 @@ final class TypingManager: NSObject, ObservableObject {
     // index retry here — resume re-executes the current edit (existing
     // editing behaviour), so the newline is attempted again that way.
     private var pendingEditNewlineWorkItem: DispatchWorkItem?
-    // The single delayed Cmd+Left after Return (see CodeInputCore).
+    // Option B indent adjustment after Return (see CodeInputCore).
     // Cancelled on pause/abort/stop; it carries no newline index, so
     // cancelling it after Return has fired does not retry the newline.
-    private var pendingLineResetWorkItem: DispatchWorkItem?
+    private var pendingLineIndentWorkItem: DispatchWorkItem?
+    /// Target indent (spaces) of the line being started, computed
+    /// from the source text at the newline. Nil when no newline is
+    /// being adjusted (e.g. prose, or the first line of a run).
+    private var pendingLineTargetIndent: Int?
+    /// Previous line's source text, for predicting auto-indent when
+    /// AX gives no column.
+    private var pendingLinePreviousLine: String?
+    /// True while the next source characters are leading whitespace
+    /// of a line whose indent is being set by the adjustment, not by
+    /// typing spaces. Set at a Code Mode newline, cleared on the
+    /// first non-whitespace character of the line.
+    private var atLineStart = false
+    /// Last column read by the indent poll, to detect that
+    /// auto-indent has finished landing (column stable across reads).
+    private var lastIndentColumn: Int?
 
-    /// Closed-loop line-start reset (option A). After Return, poll the
-    /// cursor column via Accessibility and press Cmd+Left only while
-    /// the column is > 0, verifying it reached 0. A press is never
-    /// sent when the column is already 0, so VS Code's Home toggle
-    /// can never undo a successful reset. If the column cannot be
-    /// read (editor does not expose it via AX), fall back to a single
-    /// timed press on the first attempt, exactly as before.
+    /// Option B (IDE-aware stream). After Return, do NOT type the
+    /// next line's leading spaces. Instead, adjust the cursor column
+    /// — which VS Code's auto-indent has already set — to the source
+    /// line's target indent, then skip those spaces when they come
+    /// up in the source stream. Adjustment is Backspace for excess
+    /// indent (counted, on a whitespace-only line) and spaces for
+    /// missing indent, never a Home toggle, so it cannot undo itself.
     /// Polls are capped so the loop finishes before the next
-    /// character (0.25s newline pause); if the column is still > 0
-    /// after the last attempt, typing proceeds anyway rather than
-    /// stalling — the failure is then the old +4 indent, not a hang.
-    private func scheduleLineStartReset() {
-        pendingLineResetWorkItem?.cancel()
+    /// character (0.25s newline pause); if the column is still not
+    /// the target after the last attempt, typing proceeds anyway
+    /// rather than stalling.
+    private func scheduleLineIndentAdjustment() {
+        pendingLineIndentWorkItem?.cancel()
+        lastIndentColumn = nil
         let workItem = DispatchWorkItem { [weak self] in
-            self?.pollLineStartReset(attempt: 0)
+            self?.pollLineIndent(attempt: 0)
         }
-        pendingLineResetWorkItem = workItem
+        pendingLineIndentWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + CodeInputCore.lineStartResetDelay, execute: workItem)
     }
 
-    private func pollLineStartReset(attempt: Int) {
+    private func pollLineIndent(attempt: Int) {
         guard state == .typing || state == .editing else {
-            pendingLineResetWorkItem = nil
+            pendingLineIndentWorkItem = nil
             return
         }
-        guard let column = currentCursorColumn() else {
-            // AX column unavailable: single timed press, once, then stop.
-            if attempt == 0 {
-                sendArrowKey(.left, withModifier: .command)
+        guard let target = pendingLineTargetIndent else {
+            pendingLineIndentWorkItem = nil
+            return
+        }
+        if let column = currentCursorColumn() {
+            // Wait for auto-indent to finish landing: only adjust
+            // once the column is stable across two reads, or when
+            // attempts run out.
+            if column != lastIndentColumn, attempt < CodeInputCore.lineStartResetMaxAttempts {
+                lastIndentColumn = column
+                let workItem = DispatchWorkItem { [weak self] in
+                    self?.pollLineIndent(attempt: attempt + 1)
+                }
+                pendingLineIndentWorkItem = workItem
+                DispatchQueue.main.asyncAfter(deadline: .now() + CodeInputCore.lineStartResetPollInterval, execute: workItem)
+                return
             }
-            pendingLineResetWorkItem = nil
+            adjustIndent(from: column, to: target)
+            if let verified = currentCursorColumn(), verified == target {
+                pendingLineIndentWorkItem = nil
+                return
+            }
+            if attempt >= CodeInputCore.lineStartResetMaxAttempts {
+                appLog("Line indent unverified, column \(currentCursorColumn() ?? -1) target \(target)", level: .debug)
+                pendingLineIndentWorkItem = nil
+                return
+            }
+            // Column moved after adjustment (late auto-indent): retry once more.
+            let workItem = DispatchWorkItem { [weak self] in
+                self?.pollLineIndent(attempt: attempt + 1)
+            }
+            pendingLineIndentWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + CodeInputCore.lineStartResetPollInterval, execute: workItem)
             return
         }
-        if column == 0 {
-            pendingLineResetWorkItem = nil
-            return
+        // AX column unavailable: adjust from the predicted auto-indent.
+        // This is the B fallback that A lacked — it works even when
+        // VS Code does not expose the caret column via AX.
+        let predicted = CodeInputCore.predictedAutoIndent(after: pendingLinePreviousLine ?? "")
+        adjustIndent(from: predicted, to: target)
+        pendingLineIndentWorkItem = nil
+    }
+
+    /// Move the cursor from `column` to `target` indent on a
+    /// whitespace-only line: Backspace for excess, spaces for missing.
+    /// No-op when they are equal. Callers must ensure the line is
+    /// still blank (it is, right after Return, before any content).
+    private func adjustIndent(from column: Int, to target: Int) {
+        if column > target {
+            for _ in 0..<(column - target) { sendBackspaceKey() }
+        } else if column < target {
+            for _ in 0..<(target - column) { postUnicodeCharacter(" ") }
         }
-        if attempt >= CodeInputCore.lineStartResetMaxAttempts {
-            appLog("Line-start reset unverified after \(attempt) attempts, column \(column)", level: .debug)
-            pendingLineResetWorkItem = nil
-            return
-        }
-        sendArrowKey(.left, withModifier: .command)
-        let workItem = DispatchWorkItem { [weak self] in
-            self?.pollLineStartReset(attempt: attempt + 1)
-        }
-        pendingLineResetWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + CodeInputCore.lineStartResetPollInterval, execute: workItem)
+    }
+
+    private func sendBackspaceKey() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let keyCode: CGKeyCode = 0x33 // kVK_Delete (Backspace)
+        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else { return }
+        keyDown.flags = []
+        keyUp.flags = []
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
+    }
+
+    /// The character immediately after the caret in the target
+    /// editor, via AX, or nil if it cannot be read.
+    private func characterAfterCursor() -> Character? {
+        guard let pid = targetAppPID ?? NSWorkspace.shared.frontmostApplication?.processIdentifier else { return nil }
+        let appElement = AXUIElementCreateApplication(pid)
+        var focused: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+              let element = focused as! AXUIElement? else { return nil }
+        var rangeValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success,
+              let axValue = rangeValue as! AXValue? else { return nil }
+        var range = CFRange(location: 0, length: 0)
+        guard AXValueGetType(axValue) == .cfRange,
+              AXValueGetValue(axValue, .cfRange, &range),
+              range.length == 0, range.location >= 0 else { return nil }
+        var textValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &textValue) == .success,
+              let text = textValue as? String else { return nil }
+        let utf16 = Array(text.utf16)
+        guard range.location < utf16.count else { return nil }
+        return Character(UnicodeScalar(utf16[range.location]) ?? UnicodeScalar(0))
     }
 
     /// Cursor column (0-based) of the caret in the target editor,
@@ -329,8 +409,10 @@ final class TypingManager: NSObject, ObservableObject {
         pendingCodeNewlineWorkItem?.cancel()
         pendingCodeNewlineWorkItem = nil
         pendingCodeNewlineIndex = nil
-        pendingLineResetWorkItem?.cancel()
-        pendingLineResetWorkItem = nil
+        pendingLineIndentWorkItem?.cancel()
+        pendingLineIndentWorkItem = nil
+        atLineStart = false
+        pendingLineTargetIndent = nil
 
         textToType = Array(text)
         currentIndex = 0
@@ -434,8 +516,8 @@ final class TypingManager: NSObject, ObservableObject {
         editCharsToType = []
         pendingEditNewlineWorkItem?.cancel()
         pendingEditNewlineWorkItem = nil
-        pendingLineResetWorkItem?.cancel()
-        pendingLineResetWorkItem = nil
+        pendingLineIndentWorkItem?.cancel()
+        pendingLineIndentWorkItem = nil
 
         stopPeriodicFocusCheck()
         endSleepPrevention()
@@ -720,8 +802,8 @@ final class TypingManager: NSObject, ObservableObject {
         pendingCodeNewlineWorkItem?.cancel()
         pendingCodeNewlineWorkItem = nil
         pendingCodeNewlineIndex = nil
-        pendingLineResetWorkItem?.cancel()
-        pendingLineResetWorkItem = nil
+        pendingLineIndentWorkItem?.cancel()
+        pendingLineIndentWorkItem = nil
 
         stopPeriodicFocusCheck()
 
@@ -1137,9 +1219,10 @@ final class TypingManager: NSObject, ObservableObject {
                 }
                 self.pendingEditNewlineWorkItem = nil
                 self.sendReturnKey()
-                // Single delayed reset only — no immediate Cmd+Left,
-                // and no second one (see CodeInputCore.lineStartResetDelay).
-                self.scheduleLineStartReset()
+                // Option B: adjust the new line's indent to the source
+                // indent (see scheduleLineIndentAdjustment); leading spaces
+                // of the next line are skipped, not typed.
+                self.scheduleLineIndentAdjustment()
             }
             pendingEditNewlineWorkItem = workItem
             DispatchQueue.main.asyncAfter(deadline: .now() + CodeInputCore.suggestionDismissalDelay, execute: workItem)
@@ -1157,11 +1240,10 @@ final class TypingManager: NSObject, ObservableObject {
             self.pendingCodeNewlineWorkItem = nil
             self.pendingCodeNewlineIndex = nil
             self.sendReturnKey()
-            // Single delayed reset only — no immediate Cmd+Left, and
-            // no second one (see CodeInputCore.lineStartResetDelay).
-            // The reset moves to column 0, so the next characters'
-            // own leading spaces are the only indent.
-            self.scheduleLineStartReset()
+            // Option B: adjust the new line's indent to the source
+            // indent (see scheduleLineIndentAdjustment); leading spaces
+            // of the next line are skipped, not typed.
+            self.scheduleLineIndentAdjustment()
         }
         pendingCodeNewlineWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + CodeInputCore.suggestionDismissalDelay, execute: workItem)
@@ -1194,42 +1276,93 @@ final class TypingManager: NSObject, ObservableObject {
             )
             switch delivery {
             case .dismissCompletionThenReturnThenReset:
+                // Option B: record the next line's target indent and
+                // the previous line, for the indent adjustment that
+                // runs after Return. Leading spaces of the next line
+                // will be skipped, not typed.
+                if isCodeMode && codeInputStrategy == .simulated {
+                    let context = lineContextForNewline()
+                    pendingLineTargetIndent = context.target
+                    pendingLinePreviousLine = context.previous
+                    atLineStart = true
+                }
                 sendCodeModeNewline(isEditing: state == .editing)
             case .plainReturn:
                 sendReturnKey()
             }
             return
         }
-        
-        // Code Mode simulated closers only: send as a real key press so
-        // VS Code overtypes an auto-inserted closer instead of inserting
-        // a duplicate that gets pushed to the end of the line. Prose,
-        // Exact Insert, and all other characters keep the unicode path.
+
+        // Option B indent: leading spaces/tabs of a Code Mode line
+        // are not typed — the indent adjustment after Return already
+        // set the column to the source indent. Skip them; the first
+        // non-whitespace character clears atLineStart below.
+        if isCodeMode && codeInputStrategy == .simulated && atLineStart && (character == " " || character == "\t") {
+            return
+        }
+        atLineStart = false
+
+        // Option B closers: if the character immediately after the
+        // caret is the same closer, the IDE auto-inserted it — step
+        // past it with Right Arrow instead of typing it. Otherwise
+        // send it as a real key press so VS Code overtypes an
+        // auto-inserted closer (see closingKeyCode). Prose, Exact
+        // Insert, and all other characters keep the unicode path.
         if isCodeMode && codeInputStrategy == .simulated,
            let (keyCode, needsShift) = CodeInputCore.closingKeyCode(for: character) {
+            if let next = characterAfterCursor(), next == character {
+                sendArrowKey(.right)
+                return
+            }
             sendKeyCode(keyCode, shift: needsShift)
             return
         }
 
+        postUnicodeCharacter(character)
+    }
+
+    /// Target indent and previous-line text for the line starting
+    /// after the newline just sent. Uses textToType/currentIndex in
+    /// the typing phase and editCharsToType/editCharIndex in editing.
+    private func lineContextForNewline() -> (target: Int, previous: String) {
+        let chars: [Character]
+        let index: Int
+        if state == .editing {
+            chars = editCharsToType
+            index = editCharIndex
+        } else {
+            chars = textToType
+            index = currentIndex
+        }
+        let target = CodeInputCore.targetIndentAfterNewline(in: chars, at: index)
+        // Previous line: from the newline before this one to this one.
+        var start = 0
+        var i = index - 2 // character before the newline just sent
+        while i >= 0 {
+            if chars[i] == "\n" || chars[i] == "\r" { start = i + 1; break }
+            i -= 1
+        }
+        let end = max(start, index - 1)
+        let previous = start < end ? String(chars[start..<end]) : ""
+        return (target, previous)
+    }
+
+    /// Post one character as a unicode CGEvent (virtual key 0).
+    /// Used by sendCharacter and by the indent adjustment for spaces.
+    private func postUnicodeCharacter(_ character: Character) {
+        let source = CGEventSource(stateID: .hidSystemState)
         guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
               let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
             return
         }
-
-        // Explicitly clear all modifier flags to prevent any flag pollution
-        // from prior key events (arrow keys, forward delete, etc.)
         keyDown.flags = []
         keyUp.flags = []
-
         let string = String(character)
         let utf16 = Array(string.utf16)
-
         utf16.withUnsafeBufferPointer { buffer in
             guard let baseAddress = buffer.baseAddress else { return }
-
             keyDown.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: baseAddress)
             keyUp.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: baseAddress)
-
             keyDown.post(tap: .cghidEventTap)
             keyUp.post(tap: .cghidEventTap)
         }
@@ -2075,7 +2208,7 @@ final class TypingManager: NSObject, ObservableObject {
             // may still be pending; wait for it before completion, so
             // the next edit's navigation cannot run ahead of the Return.
             let baseFinalDelay = interCharacterDelay * editingDelayMultiplier
-            let finalDelay = (pendingEditNewlineWorkItem != nil || pendingLineResetWorkItem != nil)
+            let finalDelay = (pendingEditNewlineWorkItem != nil || pendingLineIndentWorkItem != nil)
                 ? max(baseFinalDelay, CodeInputCore.suggestionDismissalDelay + CodeInputCore.lineStartResetDelay + 0.05)
                 : baseFinalDelay
             DispatchQueue.main.asyncAfter(deadline: .now() + finalDelay) { [weak self] in
@@ -2165,8 +2298,8 @@ final class TypingManager: NSObject, ObservableObject {
         // the current edit, so the newline is attempted again there.
         pendingEditNewlineWorkItem?.cancel()
         pendingEditNewlineWorkItem = nil
-        pendingLineResetWorkItem?.cancel()
-        pendingLineResetWorkItem = nil
+        pendingLineIndentWorkItem?.cancel()
+        pendingLineIndentWorkItem = nil
 
         stopPeriodicFocusCheck()
 
@@ -2337,8 +2470,8 @@ final class TypingManager: NSObject, ObservableObject {
         editCharCompletion = nil
         pendingEditNewlineWorkItem?.cancel()
         pendingEditNewlineWorkItem = nil
-        pendingLineResetWorkItem?.cancel()
-        pendingLineResetWorkItem = nil
+        pendingLineIndentWorkItem?.cancel()
+        pendingLineIndentWorkItem = nil
 
         stopPeriodicFocusCheck()
         endSleepPrevention()

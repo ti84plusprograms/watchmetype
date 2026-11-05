@@ -204,30 +204,37 @@ lands before the next character; if initial typing pauses before that
 Return fires, the newline is retried on resume rather than skipped
 (revision pauses cancel the deferred Return and resume re-executes
 the current edit, which attempts the newline again); (2) Return;
-(3) a closed-loop line-start reset: after Return, the app reads
-the cursor column via Accessibility and presses Cmd+Left only
-while the column is > 0, verifying it reached 0 (polls every
-0.02s, at most 3 attempts, finishing before the next character
-at 0.25s). A press is never sent when the column is already 0,
-so VS Code's Home toggle can never undo a successful reset —
-a blind second Cmd+Left was tried first and made the staircase
-worse in testing, because on a blank auto-indented line the
-first non-whitespace position is the end of the indent, so a
-second press moves the cursor back there and the app then types
-its own spaces on top. If the column cannot be read via AX
-(some editors do not expose it), the app falls back to a single
-timed Cmd+Left, exactly as before; if the column is still > 0
-after the last poll, typing proceeds rather than stalling.
-(4) Closing brackets/quotes in Code Mode simulated typing are sent
-as real key presses (US ANSI keycodes, Shift where needed), not as
-unicode strings: VS Code auto-inserts a closer when an opener is
-typed, but a unicode closer is inserted as text and does not trigger
-overtype, so auto-closers get pushed to the end of the line
-(e.g. `str(sorted([3, 1, 2]))))"` in the isolated one-line test).
-A real key press overtypes an auto-closer immediately before the
-cursor, and simply inserts when there is none (e.g. inside a
-string, where VS Code did not auto-close). Openers stay unicode,
-prose is unchanged, and Exact Insert does not go through this path.
+(3) IDE-aware indent (option B, replacing the closed-loop
+Cmd+Left reset in option A, which showed no change in testing):
+after Return, the app does NOT type the next line's leading
+spaces. It reads the cursor column via Accessibility once
+auto-indent has had a chance to land (polls every 0.02s, at
+most 3 attempts, finishing before the next character at 0.25s),
+then adjusts that column to the source line's target indent —
+Backspace for excess indent, spaces for missing indent — and
+skips the source line's leading spaces when they come up.
+If the column cannot be read via AX, it adjusts from the
+predicted auto-indent instead (same indent, +4 after `:`,
+0 after a blank line), so B works even where A silently fell
+back to a timed press. No Home/Cmd+Left press is involved at
+all, so the toggle that made a blind second press undo the
+first cannot occur. If the column is still not the target
+after the last attempt, typing proceeds rather than stalling.
+(4) Closing brackets/quotes in Code Mode simulated typing:
+if the character immediately after the caret is the same
+closer, the IDE auto-inserted it, so the app steps past it
+with Right Arrow instead of typing it. Otherwise the closer
+is sent as a real key press (US ANSI keycodes, Shift where
+needed), not as a unicode string: VS Code auto-inserts a
+closer when an opener is typed, but a unicode closer is
+inserted as text and does not trigger overtype, so auto-closers
+get pushed to the end of the line (e.g.
+`str(sorted([3, 1, 2]))))"` in the isolated one-line test).
+A real key press overtypes an auto-closer immediately before
+the cursor, and simply inserts when there is none (e.g. inside
+a string, where VS Code did not auto-close). Openers stay
+unicode, prose is unchanged, and Exact Insert does not go
+through this path.
 
 Goal: with VS Code at its defaults — auto-indent on, completion on,
 `acceptSuggestionOnEnter` on, auto-closing brackets/quotes on,

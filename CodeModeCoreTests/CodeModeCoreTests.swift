@@ -124,6 +124,21 @@ final class CodeModeCoreTests: XCTestCase {
         XCTAssertNil(CodeInputCore.closingKeyCode(for: "a"))
     }
 
+    func testOptionBIndentHelpers() {
+        XCTAssertEqual(CodeInputCore.leadingIndentSpaces("    x"), 4)
+        XCTAssertEqual(CodeInputCore.leadingIndentSpaces("x"), 0)
+        XCTAssertEqual(CodeInputCore.leadingIndentSpaces(""), 0)
+        XCTAssertEqual(CodeInputCore.leadingIndentSpaces("\t x"), 5)
+        XCTAssertEqual(CodeInputCore.targetIndentAfterNewline(in: Array("def f():\n    x"), at: 9), 4)
+        XCTAssertEqual(CodeInputCore.targetIndentAfterNewline(in: Array("def f():\n    x"), at: 10), 3)
+        XCTAssertEqual(CodeInputCore.targetIndentAfterNewline(in: Array("x\n"), at: 2), 0)
+        XCTAssertEqual(CodeInputCore.predictedAutoIndent(after: "def f():"), 4)
+        XCTAssertEqual(CodeInputCore.predictedAutoIndent(after: "    return x"), 4)
+        XCTAssertEqual(CodeInputCore.predictedAutoIndent(after: "    if y:"), 8)
+        XCTAssertEqual(CodeInputCore.predictedAutoIndent(after: ""), 0)
+        XCTAssertEqual(CodeInputCore.predictedAutoIndent(after: "   "), 0)
+    }
+
     func testIntegratedNewlineDeliveryDecisions() {
         // This tests only the pure decision in CodeInputCore, which
         // TypingManager.sendCharacter executes. The CGEvent posting

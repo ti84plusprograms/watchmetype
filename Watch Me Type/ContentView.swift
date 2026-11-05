@@ -1196,7 +1196,7 @@ struct ContentView: View {
                     .help("Occasionally type an incorrect letter and correct it.")
 
                 if codeMode && codeInputStrategy == .simulated {
-                    Text("Preserves source whitespace. Simulated newlines dismiss completion, then reset to the start of the line, in both initial typing and revisions, so IDE auto-indent should not compound with the source indent. Works with VS Code defaults; format-on-type, if explicitly enabled, is still unsupported. Verify in a disposable file first.")
+                    Text("Preserves source whitespace. Simulated newlines dismiss completion, then the app adjusts the new line's indent to the source indent and skips typing its leading spaces, in both initial typing and revisions, so IDE auto-indent should not compound with the source indent. Closers the IDE already inserted are stepped past, not retyped. Works with VS Code defaults; format-on-type, if explicitly enabled, is still unsupported. Verify in a disposable file first.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
