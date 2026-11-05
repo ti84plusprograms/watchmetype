@@ -213,6 +213,16 @@ no-op at column 0 if the first reset already worked. This addresses
 the selective failures seen in the correct-branch test, where some
 lines (notably after a completion-heavy line like `import numpy as np`)
 stayed over-indented while others reset correctly.
+(4) Closing brackets/quotes in Code Mode simulated typing are sent
+as real key presses (US ANSI keycodes, Shift where needed), not as
+unicode strings: VS Code auto-inserts a closer when an opener is
+typed, but a unicode closer is inserted as text and does not trigger
+overtype, so auto-closers get pushed to the end of the line
+(e.g. `str(sorted([3, 1, 2]))))"` in the isolated one-line test).
+A real key press overtypes an auto-closer immediately before the
+cursor, and simply inserts when there is none (e.g. inside a
+string, where VS Code did not auto-close). Openers stay unicode,
+prose is unchanged, and Exact Insert does not go through this path.
 
 Goal: with VS Code at its defaults — auto-indent on, completion on,
 `acceptSuggestionOnEnter` on, auto-closing brackets/quotes on,

@@ -102,6 +102,22 @@ final class CodeModeCoreTests: XCTestCase {
         XCTAssertEqual(CodeInputCore.minimumDelay(after: "a"), 0)
     }
 
+    func testClosingKeyCodesAreUSANSIAndOpenersAreNotClosers() {
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: ")")?.keyCode, 0x1D)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: ")")?.needsShift, true)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "]")?.keyCode, 0x1E)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "]")?.needsShift, false)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "}")?.keyCode, 0x21)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "}")?.needsShift, true)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "\"")?.keyCode, 0x27)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "\"")?.needsShift, true)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "'")?.keyCode, 0x27)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "'")?.needsShift, false)
+        XCTAssertNil(CodeInputCore.closingKeyCode(for: "("))
+        XCTAssertNil(CodeInputCore.closingKeyCode(for: "["))
+        XCTAssertNil(CodeInputCore.closingKeyCode(for: "a"))
+    }
+
     func testIntegratedNewlineDeliveryDecisions() {
         // This tests only the pure decision in CodeInputCore, which
         // TypingManager.sendCharacter executes. The CGEvent posting

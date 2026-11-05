@@ -146,6 +146,33 @@ enum CodeInputCore {
     /// no-op at column 0.
     static let lineStartResetDelay: TimeInterval = 0.05
 
+    /// Real-keycode mapping for closing brackets/quotes in Code Mode
+    /// simulated typing, on a US ANSI layout. Returns the virtual key
+    /// code and whether Shift is held, or nil for any other character.
+    ///
+    /// Why keycodes, not unicode: VS Code auto-inserts a closer when
+    /// the app types an opener (unicode openers do trigger auto-close),
+    /// but a closer sent as a unicode string is inserted as text and
+    /// does NOT trigger VS Code's overtype of that auto-closer. The
+    /// auto-closers are then pushed to the end of the line as a
+    /// trailing garbage sequence (e.g. `]))))"` after a correct line).
+    /// A closer sent as a real key press is what a human types, so
+    /// VS Code overtypes an auto-closer immediately before the cursor,
+    /// and simply inserts when there is no auto-closer to overtype
+    /// (e.g. inside a string, where VS Code did not auto-close).
+    /// Openers are intentionally left as unicode: they already trigger
+    /// auto-close correctly, and changing them is not needed.
+    static func closingKeyCode(for character: Character) -> (keyCode: UInt16, needsShift: Bool)? {
+        switch character {
+        case ")": return (0x1D, true)   // Shift + 0
+        case "]": return (0x1E, false)  // ]
+        case "}": return (0x21, true)   // Shift + [
+        case "\"": return (0x27, true) // Shift + '
+        case "'": return (0x27, false) // '
+        default: return nil
+        }
+    }
+
     static func minimumDelay(after character: Character) -> TimeInterval {
         if character == "\n" || character == "\r" {
             // Leave time for Escape -> Return and the editor's input queue.

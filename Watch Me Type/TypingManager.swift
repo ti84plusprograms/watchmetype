@@ -1102,6 +1102,16 @@ final class TypingManager: NSObject, ObservableObject {
             return
         }
         
+        // Code Mode simulated closers only: send as a real key press so
+        // VS Code overtypes an auto-inserted closer instead of inserting
+        // a duplicate that gets pushed to the end of the line. Prose,
+        // Exact Insert, and all other characters keep the unicode path.
+        if isCodeMode && codeInputStrategy == .simulated,
+           let (keyCode, needsShift) = CodeInputCore.closingKeyCode(for: character) {
+            sendKeyCode(keyCode, shift: needsShift)
+            return
+        }
+
         guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
               let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
             return
@@ -1274,6 +1284,21 @@ final class TypingManager: NSObject, ObservableObject {
               let keyUp = CGEvent(keyboardEventSource: source, virtualKey: escapeKeyCode, keyDown: false) else {
             return
         }
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
+    }
+
+    /// Send one real key press (used for Code Mode closers, so the
+    /// target editor's overtype logic runs). Same flag pattern as
+    /// sendArrowKey: Shift on key down, cleared on key up.
+    private func sendKeyCode(_ keyCode: CGKeyCode, shift: Bool) {
+        let source = CGEventSource(stateID: .hidSystemState)
+        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+            return
+        }
+        keyDown.flags = shift ? .maskShift : []
+        keyUp.flags = []
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
     }
