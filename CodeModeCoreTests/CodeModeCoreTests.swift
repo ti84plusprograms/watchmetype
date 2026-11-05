@@ -139,6 +139,24 @@ final class CodeModeCoreTests: XCTestCase {
         XCTAssertEqual(CodeInputCore.predictedAutoIndent(after: "   "), 0)
     }
 
+    func testRecommendedVSCodeSettingsJSON() throws {
+        let data = Data(CodeInputCore.recommendedVSCodeSettingsJSON.utf8)
+        let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let settings = try XCTUnwrap(parsed)
+        XCTAssertEqual(settings["editor.autoIndent"] as? String, "full")
+        XCTAssertEqual(settings["editor.acceptSuggestionOnEnter"] as? String, "on")
+        XCTAssertEqual(settings["editor.autoClosingBrackets"] as? String, "languageDefined")
+        XCTAssertEqual(settings["editor.autoClosingQuotes"] as? String, "languageDefined")
+        XCTAssertEqual(settings["editor.formatOnType"] as? Bool, false)
+        XCTAssertEqual(settings["editor.formatOnPaste"] as? Bool, false)
+        XCTAssertEqual(settings["editor.tabSize"] as? Int, 4)
+        XCTAssertEqual(settings["editor.insertSpaces"] as? Bool, true)
+        let quick = try XCTUnwrap(settings["editor.quickSuggestions"] as? [String: Any])
+        XCTAssertEqual(quick["other"] as? Bool, true)
+        XCTAssertEqual(quick["comments"] as? Bool, false)
+        XCTAssertEqual(quick["strings"] as? Bool, false)
+    }
+
     func testIntegratedNewlineDeliveryDecisions() {
         // This tests only the pure decision in CodeInputCore, which
         // TypingManager.sendCharacter executes. The CGEvent posting

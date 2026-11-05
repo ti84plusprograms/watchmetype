@@ -166,6 +166,35 @@ enum CodeInputCore {
     static let lineStartResetPollInterval: TimeInterval = 0.02
     static let lineStartResetMaxAttempts: Int = 3
 
+    /// Recommended VS Code workspace settings for simulated Code
+    /// Mode typing, shown in the app so the user can copy-paste
+    /// them into `.vscode/settings.json` (Cmd+Shift+P ->
+    /// Preferences: Open Workspace Settings (JSON)). These are
+    /// the VS Code defaults option B was built and tested against:
+    /// auto-indent and auto-closing on, format-on-type/paste off,
+    /// 4-space indents. They are the settings to use, not a claim
+    /// that a run with them has yet passed — see README.
+    /// macOS "Add period with double-space" is a system setting,
+    /// not in this JSON; it still needs to be off.
+    static let recommendedVSCodeSettingsJSON = """
+    {
+        "editor.autoIndent": "full",
+        "editor.acceptSuggestionOnEnter": "on",
+        "editor.suggestOnTriggerCharacters": true,
+        "editor.quickSuggestions": {
+            "other": true,
+            "comments": false,
+            "strings": false
+        },
+        "editor.autoClosingBrackets": "languageDefined",
+        "editor.autoClosingQuotes": "languageDefined",
+        "editor.formatOnType": false,
+        "editor.formatOnPaste": false,
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true
+    }
+    """
+
     /// Option B (IDE-aware stream): leading indent in spaces, counting
     /// a tab as 4. Used both for the target indent of the next line
     /// and for predicting the IDE's auto-indent.
