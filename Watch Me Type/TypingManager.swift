@@ -118,13 +118,15 @@ final class TypingManager: NSObject, ObservableObject {
     // index retry here — resume re-executes the current edit (existing
     // editing behaviour), so the newline is attempted again that way.
     private var pendingEditNewlineWorkItem: DispatchWorkItem?
-    // Delayed second Cmd+Left after Return (see CodeInputCore).
+    // The single delayed Cmd+Left after Return (see CodeInputCore).
     // Cancelled on pause/abort/stop; it carries no newline index, so
     // cancelling it after Return has fired does not retry the newline.
     private var pendingLineResetWorkItem: DispatchWorkItem?
 
-    /// Post a second Cmd+Left after `lineStartResetDelay`, to catch
-    /// auto-indent that lands after the immediate post-Return reset.
+    /// Post the single Cmd+Left after `lineStartResetDelay`, once
+    /// auto-indent has had a chance to land. Exactly one press: a
+    /// second press would toggle the cursor back to the end of the
+    /// indent (VS Code Home toggle) and undo the reset.
     private func scheduleLineStartReset() {
         pendingLineResetWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
@@ -1037,9 +1039,8 @@ final class TypingManager: NSObject, ObservableObject {
                 }
                 self.pendingEditNewlineWorkItem = nil
                 self.sendReturnKey()
-                self.sendArrowKey(.left, withModifier: .command)
-                // Second reset, delayed: catches auto-indent that lands
-                // after the immediate reset (see CodeInputCore).
+                // Single delayed reset only — no immediate Cmd+Left,
+                // and no second one (see CodeInputCore.lineStartResetDelay).
                 self.scheduleLineStartReset()
             }
             pendingEditNewlineWorkItem = workItem
@@ -1058,10 +1059,10 @@ final class TypingManager: NSObject, ObservableObject {
             self.pendingCodeNewlineWorkItem = nil
             self.pendingCodeNewlineIndex = nil
             self.sendReturnKey()
-            // Posted in order, after Return: the IDE applies auto-indent
-            // first, then this moves to column 0, so the next characters'
+            // Single delayed reset only — no immediate Cmd+Left, and
+            // no second one (see CodeInputCore.lineStartResetDelay).
+            // The reset moves to column 0, so the next characters'
             // own leading spaces are the only indent.
-            self.sendArrowKey(.left, withModifier: .command)
             self.scheduleLineStartReset()
         }
         pendingCodeNewlineWorkItem = workItem

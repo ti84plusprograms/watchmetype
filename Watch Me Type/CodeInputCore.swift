@@ -137,13 +137,21 @@ enum CodeInputCore {
     /// a Return the IDE drops outright — see README.
     static let suggestionDismissalDelay: TimeInterval = 0.10
 
-    /// Second Cmd+Left after Return. VS Code applies auto-indent
-    /// asynchronously after Return, so a Cmd+Left posted immediately
-    /// after Return can run before auto-indent lands and do nothing.
-    /// A second Cmd+Left 0.05s later catches the late auto-indent,
-    /// while still firing before the next character (0.25s newline
-    /// pause). If the first reset already worked, the second is a
-    /// no-op at column 0.
+    /// Delay between Return and the (single) Cmd+Left line-start
+    /// reset. VS Code applies auto-indent asynchronously after Return,
+    /// so a Cmd+Left posted immediately after Return can run before
+    /// auto-indent lands and do nothing. Delaying the one reset by
+    /// 0.05s lets auto-indent land first, while still firing before
+    /// the next character (0.25s newline pause).
+    ///
+    /// Do NOT post a second Cmd+Left as a safety net: VS Code's Home
+    /// (Cmd+Left) toggles between the first non-whitespace character
+    /// and column 0. On a blank auto-indented line the first
+    /// non-whitespace position is the end of the indent, so a second
+    /// press after a successful first press moves the cursor back to
+    /// the end of the indent and undoes the reset — the app then types
+    /// its own spaces on top and the staircase gets worse, which is
+    /// exactly what the second-reset attempt (8464a2c) did in testing.
     static let lineStartResetDelay: TimeInterval = 0.05
 
     /// Real-keycode mapping for closing brackets/quotes in Code Mode

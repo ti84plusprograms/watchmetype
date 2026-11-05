@@ -204,15 +204,18 @@ lands before the next character; if initial typing pauses before that
 Return fires, the newline is retried on resume rather than skipped
 (revision pauses cancel the deferred Return and resume re-executes
 the current edit, which attempts the newline again); (2) Return;
-(3) Cmd+Left to the start of the new line, plus a second Cmd+Left
-0.05s later (0.15s total, still before the next character at 0.25s):
-VS Code applies auto-indent asynchronously after Return, so a single
-immediate reset can run before auto-indent lands and do nothing —
-the delayed second reset catches that late auto-indent, and is a
-no-op at column 0 if the first reset already worked. This addresses
-the selective failures seen in the correct-branch test, where some
-lines (notably after a completion-heavy line like `import numpy as np`)
-stayed over-indented while others reset correctly.
+(3) a single Cmd+Left to the start of the new line, delayed 0.05s
+after Return (0.15s total, still before the next character at
+0.25s): VS Code applies auto-indent asynchronously after Return, so
+an immediate reset can run before auto-indent lands and do nothing,
+and delaying the one reset lets auto-indent land first. Exactly one
+press, by design — a second Cmd+Left was tried first and made the
+staircase worse in testing, because VS Code's Home (Cmd+Left)
+toggles between the first non-whitespace character and column 0:
+on a blank auto-indented line the first non-whitespace position is
+the end of the indent, so a second press after a successful first
+press moves the cursor back to the end of the indent and undoes the
+reset, and the app then types its own spaces on top.
 (4) Closing brackets/quotes in Code Mode simulated typing are sent
 as real key presses (US ANSI keycodes, Shift where needed), not as
 unicode strings: VS Code auto-inserts a closer when an opener is
