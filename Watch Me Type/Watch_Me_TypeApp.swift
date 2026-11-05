@@ -1,5 +1,6 @@
 import SwiftUI
 import ApplicationServices
+import AppKit
 
 @main
 struct Watch_Me_TypeApp: App {
@@ -17,5 +18,29 @@ struct Watch_Me_TypeApp: App {
                 .preferredColorScheme(UIRegressionFixture.forceDarkAppearance ? .dark : nil)
         }
         .defaultSize(width: 1000, height: 840)
+        .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Watch Me Type") {
+                    let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+                    let localChanges = GitInfo.worktreeState == "clean"
+                        ? "none"
+                        : "ID \(GitInfo.worktreeFingerprint)"
+                    let details = """
+                    Branch: \(GitInfo.branch)
+                    Commit: \(GitInfo.commit)
+                    Git description: \(GitInfo.gitDescription)
+                    Local changes: \(localChanges)
+                    Built: \(GitInfo.builtAt)
+                    Running from: \(Bundle.main.bundleURL.path)
+                    """
+                    let options: [NSApplication.AboutPanelOptionKey: Any] = [
+                        .applicationName: "Watch Me Type",
+                        .applicationVersion: "Version \(version) - \(GitInfo.displayString)",
+                        .credits: NSAttributedString(string: details)
+                    ]
+                    NSApplication.shared.orderFrontStandardAboutPanel(options: options)
+                }
+            }
+        }
     }
 }
