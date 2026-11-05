@@ -101,6 +101,24 @@ Tests under `Watch Me TypeTests/` cover `EditOperationConverter` (tokenisation, 
 4. Grant **Accessibility** permission separately to the exact executable you run: **System Settings > Privacy & Security > Accessibility**. Previously granted permissions for upstream or a different build do not automatically apply.
 5. **All in-app Sparkle update functionality is disabled** in this fork: automatic checks in the plist, updater startup, and the manual Check for Updates menu. The fork feed is intentionally empty. Do not turn update functionality back on until a signed and authorized fork release is ready.
 
+### Build version metadata
+
+Before compiling the app, Xcode runs `scripts/generate-git-info.sh` and writes
+`GitInfo.generated.swift` to `DERIVED_FILE_DIR`. The generated source is part of
+the app target. **About Watch Me Type** shows the app version, a 12-character
+commit hash, and either `clean` or a short local-change ID. Its details show
+the branch, full commit, nearest-tag description, UTC build time, and the path
+of the running app. The local-change ID hashes staged and unstaged tracked
+changes plus the names and contents of non-ignored untracked files, so two
+different uncommitted worktrees can be distinguished. Ignored files are not
+included. This identifies the checkout used for a build; confirming that it
+matches the current remote branch still requires refreshing and comparing the
+remote tracking branch. The project keeps **User Script Sandboxing** disabled
+because the trusted script reads repository metadata under `.git`; the app's
+runtime sandbox remains enabled. The build fails with a clear error if Git
+metadata is unavailable instead of silently compiling without version
+information.
+
 ### Fork signing and future update setup
 
 This is a **pre-release checklist only**; no signing key or release is created by this branch.

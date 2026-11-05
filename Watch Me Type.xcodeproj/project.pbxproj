@@ -7,11 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		4297018F309C54420054BE36 /* GitInfo.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42970190309C54420054BE36 /* GitInfo.generated.swift */; };
 		D03BF2592F1070D50092CD67 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = D03BF2582F1070D50092CD67 /* Localizable.xcstrings */; };
 		D057C7052F2488A9001288B2 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = D057C7042F2488A9001288B2 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		42970190309C54420054BE36 /* GitInfo.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitInfo.generated.swift; sourceTree = DERIVED_FILE_DIR; };
 		D03BF2582F1070D50092CD67 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		D057C7022F247409001288B2 /* *.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "*.entitlements"; sourceTree = "<group>"; };
 		D0C2C4AF2EE01E0300F56072 /* Watch Me Type.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Watch Me Type.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -85,6 +87,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = D0C2C4BA2EE01E0400F56072 /* Build configuration list for PBXNativeTarget "Watch Me Type" */;
 			buildPhases = (
+				4297018E309C54420054BE36 /* Run Script */,
 				D0C2C4AB2EE01E0300F56072 /* Sources */,
 				D0C2C4AC2EE01E0300F56072 /* Frameworks */,
 				D0C2C4AD2EE01E0300F56072 /* Resources */,
@@ -197,11 +200,36 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		4297018E309C54420054BE36 /* Run Script */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/scripts/generate-git-info.sh",
+			);
+			name = "Generate Git Version Info";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/GitInfo.generated.swift",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "/bin/sh \"${SRCROOT}/scripts/generate-git-info.sh\" \"${SRCROOT}\" \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		D0C2C4AB2EE01E0300F56072 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4297018F309C54420054BE36 /* GitInfo.generated.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -254,7 +282,7 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -321,7 +349,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
