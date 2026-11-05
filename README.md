@@ -204,9 +204,15 @@ lands before the next character; if initial typing pauses before that
 Return fires, the newline is retried on resume rather than skipped
 (revision pauses cancel the deferred Return and resume re-executes
 the current edit, which attempts the newline again); (2) Return;
-(3) Cmd+Left to the start of the new line, so an IDE's auto-indent
-does not compound with the source text's own leading spaces
-(previously this produced a staircase indent in VS Code).
+(3) Cmd+Left to the start of the new line, plus a second Cmd+Left
+0.05s later (0.15s total, still before the next character at 0.25s):
+VS Code applies auto-indent asynchronously after Return, so a single
+immediate reset can run before auto-indent lands and do nothing —
+the delayed second reset catches that late auto-indent, and is a
+no-op at column 0 if the first reset already worked. This addresses
+the selective failures seen in the correct-branch test, where some
+lines (notably after a completion-heavy line like `import numpy as np`)
+stayed over-indented while others reset correctly.
 
 Goal: with VS Code at its defaults — auto-indent on, completion on,
 `acceptSuggestionOnEnter` on, auto-closing brackets/quotes on,

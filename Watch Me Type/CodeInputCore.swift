@@ -137,6 +137,15 @@ enum CodeInputCore {
     /// a Return the IDE drops outright — see README.
     static let suggestionDismissalDelay: TimeInterval = 0.10
 
+    /// Second Cmd+Left after Return. VS Code applies auto-indent
+    /// asynchronously after Return, so a Cmd+Left posted immediately
+    /// after Return can run before auto-indent lands and do nothing.
+    /// A second Cmd+Left 0.05s later catches the late auto-indent,
+    /// while still firing before the next character (0.25s newline
+    /// pause). If the first reset already worked, the second is a
+    /// no-op at column 0.
+    static let lineStartResetDelay: TimeInterval = 0.05
+
     static func minimumDelay(after character: Character) -> TimeInterval {
         if character == "\n" || character == "\r" {
             // Leave time for Escape -> Return and the editor's input queue.

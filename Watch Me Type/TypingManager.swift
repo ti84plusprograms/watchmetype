@@ -118,6 +118,23 @@ final class TypingManager: NSObject, ObservableObject {
     // index retry here — resume re-executes the current edit (existing
     // editing behaviour), so the newline is attempted again that way.
     private var pendingEditNewlineWorkItem: DispatchWorkItem?
+    // Delayed second Cmd+Left after Return (see CodeInputCore).
+    // Cancelled on pause/abort/stop; it carries no newline index, so
+    // cancelling it after Return has fired does not retry the newline.
+    private var pendingLineResetWorkItem: DispatchWorkItem?
+
+    /// Post a second Cmd+Left after `lineStartResetDelay`, to catch
+    /// auto-indent that lands after the immediate post-Return reset.
+    private func scheduleLineStartReset() {
+        pendingLineResetWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self, self.state == .typing || self.state == .editing else { return }
+            self.pendingLineResetWorkItem = nil
+            self.sendArrowKey(.left, withModifier: .command)
+        }
+        pendingLineResetWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + CodeInputCore.lineStartResetDelay, execute: workItem)
+    }
     // Synthetic Escape must not trigger Watch Me Type's global Escape-to-pause shortcut.
     private static let syntheticDismissalEscapeTag: Int64 = 0x574D545F455343
     
@@ -212,6 +229,8 @@ final class TypingManager: NSObject, ObservableObject {
         pendingCodeNewlineWorkItem?.cancel()
         pendingCodeNewlineWorkItem = nil
         pendingCodeNewlineIndex = nil
+        pendingLineResetWorkItem?.cancel()
+        pendingLineResetWorkItem = nil
 
         textToType = Array(text)
         currentIndex = 0
@@ -315,6 +334,8 @@ final class TypingManager: NSObject, ObservableObject {
         editCharsToType = []
         pendingEditNewlineWorkItem?.cancel()
         pendingEditNewlineWorkItem = nil
+        pendingLineResetWorkItem?.cancel()
+        pendingLineResetWorkItem = nil
 
         stopPeriodicFocusCheck()
         endSleepPrevention()
@@ -599,6 +620,8 @@ final class TypingManager: NSObject, ObservableObject {
         pendingCodeNewlineWorkItem?.cancel()
         pendingCodeNewlineWorkItem = nil
         pendingCodeNewlineIndex = nil
+        pendingLineResetWorkItem?.cancel()
+        pendingLineResetWorkItem = nil
 
         stopPeriodicFocusCheck()
 
@@ -1015,6 +1038,9 @@ final class TypingManager: NSObject, ObservableObject {
                 self.pendingEditNewlineWorkItem = nil
                 self.sendReturnKey()
                 self.sendArrowKey(.left, withModifier: .command)
+                // Second reset, delayed: catches auto-indent that lands
+                // after the immediate reset (see CodeInputCore).
+                self.scheduleLineStartReset()
             }
             pendingEditNewlineWorkItem = workItem
             DispatchQueue.main.asyncAfter(deadline: .now() + CodeInputCore.suggestionDismissalDelay, execute: workItem)
@@ -1036,6 +1062,7 @@ final class TypingManager: NSObject, ObservableObject {
             // first, then this moves to column 0, so the next characters'
             // own leading spaces are the only indent.
             self.sendArrowKey(.left, withModifier: .command)
+            self.scheduleLineStartReset()
         }
         pendingCodeNewlineWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + CodeInputCore.suggestionDismissalDelay, execute: workItem)
@@ -1924,8 +1951,8 @@ final class TypingManager: NSObject, ObservableObject {
             // may still be pending; wait for it before completion, so
             // the next edit's navigation cannot run ahead of the Return.
             let baseFinalDelay = interCharacterDelay * editingDelayMultiplier
-            let finalDelay = pendingEditNewlineWorkItem != nil
-                ? max(baseFinalDelay, CodeInputCore.suggestionDismissalDelay + 0.05)
+            let finalDelay = (pendingEditNewlineWorkItem != nil || pendingLineResetWorkItem != nil)
+                ? max(baseFinalDelay, CodeInputCore.suggestionDismissalDelay + CodeInputCore.lineStartResetDelay + 0.05)
                 : baseFinalDelay
             DispatchQueue.main.asyncAfter(deadline: .now() + finalDelay) { [weak self] in
                 guard let self = self else { return }
@@ -2014,6 +2041,8 @@ final class TypingManager: NSObject, ObservableObject {
         // the current edit, so the newline is attempted again there.
         pendingEditNewlineWorkItem?.cancel()
         pendingEditNewlineWorkItem = nil
+        pendingLineResetWorkItem?.cancel()
+        pendingLineResetWorkItem = nil
 
         stopPeriodicFocusCheck()
 
@@ -2184,6 +2213,8 @@ final class TypingManager: NSObject, ObservableObject {
         editCharCompletion = nil
         pendingEditNewlineWorkItem?.cancel()
         pendingEditNewlineWorkItem = nil
+        pendingLineResetWorkItem?.cancel()
+        pendingLineResetWorkItem = nil
 
         stopPeriodicFocusCheck()
         endSleepPrevention()
