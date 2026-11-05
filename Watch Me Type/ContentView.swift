@@ -1196,7 +1196,7 @@ struct ContentView: View {
                     .help("Occasionally type an incorrect letter and correct it.")
 
                 if codeMode && codeInputStrategy == .simulated {
-                    Text("Preserves source whitespace. Disable auto-indent, auto-format and bracket completion in the target IDE when simulating typing.")
+                    Text("Preserves source whitespace. Simulated newlines dismiss completion, then reset to the start of the line, so IDE auto-indent should not compound with the source indent. Still disable auto-format and bracket completion in the target IDE, and verify in a disposable file first — revisions do not get the completion dismissal, only the line-start reset.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

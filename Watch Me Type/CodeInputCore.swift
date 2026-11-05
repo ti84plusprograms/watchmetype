@@ -98,10 +98,48 @@ enum CodeInputCore {
         return count
     }
 
+    /// How a simulated newline is delivered to the target editor.
+    /// This decision is pure and SwiftPM-testable; the CGEvent posting
+    /// itself lives in TypingManager and cannot be unit-tested here.
+    enum NewlineDelivery: Equatable {
+        /// Plain Return, as before. Used for prose and as the safe fallback.
+        case plainReturn
+        /// Initial simulated Code Mode pass: tagged Escape to dismiss
+        /// completion, deferred Return, then Cmd+Left to line start.
+        case dismissCompletionThenReturnThenReset
+        /// Code Mode revision (editing) pass: synchronous Return, then
+        /// Cmd+Left to line start. No Escape dismissal, because the
+        /// deferred Return and pause-retry machinery are tied to the
+        /// typing-phase scheduler, not the editing scheduler.
+        case returnThenReset
+    }
+
+    /// Decide newline delivery from the caller's phase, without AppKit.
+    /// `initialSimulated` means Code Mode, typing state, simulated
+    /// strategy (not Exact Insert). `editing` means Code Mode revision
+    /// state. Anything else — including prose, and Code Mode with
+    /// Exact Insert on the initial pass — falls back to plain Return.
+    static func newlineDelivery(
+        codeMode: Bool,
+        initialSimulated: Bool,
+        editing: Bool
+    ) -> NewlineDelivery {
+        guard codeMode else { return .plainReturn }
+        if initialSimulated { return .dismissCompletionThenReturnThenReset }
+        if editing { return .returnThenReset }
+        return .plainReturn
+    }
+
     /// Give editors time to process structural keys; WPM remains the base
     /// speed, but bursty punctuation/newlines are deliberately slower.
+    static let suggestionDismissalDelay: TimeInterval = 0.05
+
     static func minimumDelay(after character: Character) -> TimeInterval {
-        if character == "\n" || character == "\r" || character == "\t" {
+        if character == "\n" || character == "\r" {
+            // Leave time for Escape -> Return and the editor's input queue.
+            return 0.25
+        }
+        if character == "\t" {
             return 0.12
         }
         if "()[]{}\"'".contains(character) { return 0.06 }

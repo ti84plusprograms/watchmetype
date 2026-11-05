@@ -87,10 +87,46 @@ final class CodeModeCoreTests: XCTestCase {
     }
 
     func testStructuralPacing() {
-        XCTAssertGreaterThanOrEqual(CodeInputCore.minimumDelay(after: "\n"), 0.1)
-        XCTAssertGreaterThanOrEqual(CodeInputCore.minimumDelay(after: "\t"), 0.1)
+        // Exact values, not just lower bounds: the deferred Return in
+        // TypingManager fires after suggestionDismissalDelay, and the
+        // next character is not scheduled until minimumDelay after a
+        // newline. If either value drifts, that ordering guarantee breaks.
+        XCTAssertEqual(CodeInputCore.suggestionDismissalDelay, 0.05)
+        XCTAssertEqual(CodeInputCore.minimumDelay(after: "\n"), 0.25)
+        XCTAssertGreaterThan(CodeInputCore.minimumDelay(after: "\n"), CodeInputCore.suggestionDismissalDelay)
+        XCTAssertEqual(CodeInputCore.minimumDelay(after: "\r"), CodeInputCore.minimumDelay(after: "\n"))
+        XCTAssertEqual(CodeInputCore.minimumDelay(after: "\t"), 0.12)
         XCTAssertGreaterThan(CodeInputCore.minimumDelay(after: "{"), 0)
         XCTAssertEqual(CodeInputCore.minimumDelay(after: "a"), 0)
+    }
+
+    func testIntegratedNewlineDeliveryDecisions() {
+        // This tests only the pure decision in CodeInputCore, which
+        // TypingManager.sendCharacter executes. The CGEvent posting
+        // itself (Escape tagging, Return, Cmd+Left) is AppKit-only and
+        // is covered by the README manual external-IDE checks, not here.
+        XCTAssertEqual(
+            CodeInputCore.newlineDelivery(codeMode: false, initialSimulated: true, editing: false),
+            .plainReturn
+        )
+        XCTAssertEqual(
+            CodeInputCore.newlineDelivery(codeMode: true, initialSimulated: true, editing: false),
+            .dismissCompletionThenReturnThenReset
+        )
+        XCTAssertEqual(
+            CodeInputCore.newlineDelivery(codeMode: true, initialSimulated: false, editing: true),
+            .returnThenReset
+        )
+        // In practice TypingManager passes exactly one phase at a time.
+        // Prose and Exact Insert fall back to plain Return.
+        XCTAssertEqual(
+            CodeInputCore.newlineDelivery(codeMode: true, initialSimulated: false, editing: false),
+            .plainReturn
+        )
+        XCTAssertEqual(
+            CodeInputCore.newlineDelivery(codeMode: false, initialSimulated: false, editing: true),
+            .plainReturn
+        )
     }
 
     func testInputStrategiesRemainDistinct() {
