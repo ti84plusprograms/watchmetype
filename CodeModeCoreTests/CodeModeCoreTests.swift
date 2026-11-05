@@ -93,6 +93,11 @@ final class CodeModeCoreTests: XCTestCase {
         // newline. If either value drifts, that ordering guarantee breaks.
         XCTAssertEqual(CodeInputCore.suggestionDismissalDelay, 0.10)
         XCTAssertEqual(CodeInputCore.lineStartResetDelay, 0.05)
+        XCTAssertEqual(CodeInputCore.lineStartResetPollInterval, 0.02)
+        XCTAssertEqual(CodeInputCore.lineStartResetMaxAttempts, 3)
+        // Whole closed-loop reset (dismissal + first poll + retries)
+        // must finish before the next character at the 0.25s newline pause.
+        XCTAssertLessThan(CodeInputCore.suggestionDismissalDelay + CodeInputCore.lineStartResetDelay + Double(CodeInputCore.lineStartResetMaxAttempts) * CodeInputCore.lineStartResetPollInterval, CodeInputCore.minimumDelay(after: "\n"))
         XCTAssertLessThan(CodeInputCore.suggestionDismissalDelay + CodeInputCore.lineStartResetDelay, CodeInputCore.minimumDelay(after: "\n"))
         XCTAssertEqual(CodeInputCore.minimumDelay(after: "\n"), 0.25)
         XCTAssertGreaterThan(CodeInputCore.minimumDelay(after: "\n"), CodeInputCore.suggestionDismissalDelay)

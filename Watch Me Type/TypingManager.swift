@@ -123,19 +123,117 @@ final class TypingManager: NSObject, ObservableObject {
     // cancelling it after Return has fired does not retry the newline.
     private var pendingLineResetWorkItem: DispatchWorkItem?
 
-    /// Post the single Cmd+Left after `lineStartResetDelay`, once
-    /// auto-indent has had a chance to land. Exactly one press: a
-    /// second press would toggle the cursor back to the end of the
-    /// indent (VS Code Home toggle) and undo the reset.
+    /// Closed-loop line-start reset (option A). After Return, poll the
+    /// cursor column via Accessibility and press Cmd+Left only while
+    /// the column is > 0, verifying it reached 0. A press is never
+    /// sent when the column is already 0, so VS Code's Home toggle
+    /// can never undo a successful reset. If the column cannot be
+    /// read (editor does not expose it via AX), fall back to a single
+    /// timed press on the first attempt, exactly as before.
+    /// Polls are capped so the loop finishes before the next
+    /// character (0.25s newline pause); if the column is still > 0
+    /// after the last attempt, typing proceeds anyway rather than
+    /// stalling — the failure is then the old +4 indent, not a hang.
     private func scheduleLineStartReset() {
         pendingLineResetWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
-            guard let self = self, self.state == .typing || self.state == .editing else { return }
-            self.pendingLineResetWorkItem = nil
-            self.sendArrowKey(.left, withModifier: .command)
+            self?.pollLineStartReset(attempt: 0)
         }
         pendingLineResetWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + CodeInputCore.lineStartResetDelay, execute: workItem)
+    }
+
+    private func pollLineStartReset(attempt: Int) {
+        guard state == .typing || state == .editing else {
+            pendingLineResetWorkItem = nil
+            return
+        }
+        guard let column = currentCursorColumn() else {
+            // AX column unavailable: single timed press, once, then stop.
+            if attempt == 0 {
+                sendArrowKey(.left, withModifier: .command)
+            }
+            pendingLineResetWorkItem = nil
+            return
+        }
+        if column == 0 {
+            pendingLineResetWorkItem = nil
+            return
+        }
+        if attempt >= CodeInputCore.lineStartResetMaxAttempts {
+            appLog("Line-start reset unverified after \(attempt) attempts, column \(column)", level: .debug)
+            pendingLineResetWorkItem = nil
+            return
+        }
+        sendArrowKey(.left, withModifier: .command)
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.pollLineStartReset(attempt: attempt + 1)
+        }
+        pendingLineResetWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + CodeInputCore.lineStartResetPollInterval, execute: workItem)
+    }
+
+    /// Cursor column (0-based) of the caret in the target editor,
+    /// via Accessibility, or nil if it cannot be read. Reads the
+    /// selected-text range from the focused UI element, then the
+    /// line start for that offset. Uses the AX parameterized
+    /// line/range attributes when available, and falls back to
+    /// scanning the element's value backwards for a newline.
+    /// Returns nil for a non-empty selection, for any AX failure,
+    /// and when the column cannot be computed — callers treat nil
+    /// as "unknown", never as 0.
+    private func currentCursorColumn() -> Int? {
+        guard let pid = targetAppPID ?? NSWorkspace.shared.frontmostApplication?.processIdentifier else {
+            return nil
+        }
+        let appElement = AXUIElementCreateApplication(pid)
+        var focused: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+              let element = focused as! AXUIElement? else {
+            return nil
+        }
+        var rangeValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success,
+              let axValue = rangeValue as! AXValue? else {
+            return nil
+        }
+        var range = CFRange(location: 0, length: 0)
+        guard AXValueGetType(axValue) == .cfRange,
+              AXValueGetValue(axValue, .cfRange, &range),
+              range.length == 0, range.location >= 0 else {
+            return nil
+        }
+        let location = range.location
+        // Preferred: line number and range for that line.
+        var lineValue: CFTypeRef?
+        if AXUIElementCopyParameterizedAttributeValue(element, kAXLineForIndexParameterizedAttribute as CFString, NSNumber(value: location) as CFTypeRef, &lineValue) == .success,
+           let lineNumber = lineValue as? Int {
+            var lineRangeValue: CFTypeRef?
+            if AXUIElementCopyParameterizedAttributeValue(element, kAXRangeForLineParameterizedAttribute as CFString, NSNumber(value: lineNumber) as CFTypeRef, &lineRangeValue) == .success,
+               let lineAxValue = lineRangeValue as! AXValue?,
+               AXValueGetType(lineAxValue) == .cfRange {
+                var lineRange = CFRange(location: 0, length: 0)
+                if AXValueGetValue(lineAxValue, .cfRange, &lineRange), location >= lineRange.location {
+                    return location - lineRange.location
+                }
+            }
+        }
+        // Fallback: scan the element's value backwards for a newline.
+        var textValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &textValue) == .success,
+              let text = textValue as? String else {
+            return nil
+        }
+        let utf16 = Array(text.utf16)
+        guard location <= utf16.count else { return nil }
+        var index = location - 1
+        while index >= 0 {
+            if utf16[index] == 10 { // LF
+                return location - (index + 1)
+            }
+            index -= 1
+        }
+        return location
     }
     // Synthetic Escape must not trigger Watch Me Type's global Escape-to-pause shortcut.
     private static let syntheticDismissalEscapeTag: Int64 = 0x574D545F455343

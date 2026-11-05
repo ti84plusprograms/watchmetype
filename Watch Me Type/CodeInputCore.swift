@@ -152,7 +152,18 @@ enum CodeInputCore {
     /// the end of the indent and undoes the reset — the app then types
     /// its own spaces on top and the staircase gets worse, which is
     /// exactly what the second-reset attempt (8464a2c) did in testing.
+    ///
+    /// Closed-loop reset (option A): instead of pressing blindly,
+    /// TypingManager reads the cursor column via Accessibility after
+    /// Return and presses Cmd+Left only while the column is > 0,
+    /// verifying it reached 0. A press is therefore never sent when
+    /// the column is already 0, so the toggle can never undo a
+    /// successful reset. Polls are spaced by `lineStartResetPollInterval`
+    /// and capped at `lineStartResetMaxAttempts`, so the whole loop
+    /// still finishes before the next character (0.25s newline pause).
     static let lineStartResetDelay: TimeInterval = 0.05
+    static let lineStartResetPollInterval: TimeInterval = 0.02
+    static let lineStartResetMaxAttempts: Int = 3
 
     /// Real-keycode mapping for closing brackets/quotes in Code Mode
     /// simulated typing, on a US ANSI layout. Returns the virtual key

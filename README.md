@@ -204,18 +204,20 @@ lands before the next character; if initial typing pauses before that
 Return fires, the newline is retried on resume rather than skipped
 (revision pauses cancel the deferred Return and resume re-executes
 the current edit, which attempts the newline again); (2) Return;
-(3) a single Cmd+Left to the start of the new line, delayed 0.05s
-after Return (0.15s total, still before the next character at
-0.25s): VS Code applies auto-indent asynchronously after Return, so
-an immediate reset can run before auto-indent lands and do nothing,
-and delaying the one reset lets auto-indent land first. Exactly one
-press, by design — a second Cmd+Left was tried first and made the
-staircase worse in testing, because VS Code's Home (Cmd+Left)
-toggles between the first non-whitespace character and column 0:
-on a blank auto-indented line the first non-whitespace position is
-the end of the indent, so a second press after a successful first
-press moves the cursor back to the end of the indent and undoes the
-reset, and the app then types its own spaces on top.
+(3) a closed-loop line-start reset: after Return, the app reads
+the cursor column via Accessibility and presses Cmd+Left only
+while the column is > 0, verifying it reached 0 (polls every
+0.02s, at most 3 attempts, finishing before the next character
+at 0.25s). A press is never sent when the column is already 0,
+so VS Code's Home toggle can never undo a successful reset —
+a blind second Cmd+Left was tried first and made the staircase
+worse in testing, because on a blank auto-indented line the
+first non-whitespace position is the end of the indent, so a
+second press moves the cursor back there and the app then types
+its own spaces on top. If the column cannot be read via AX
+(some editors do not expose it), the app falls back to a single
+timed Cmd+Left, exactly as before; if the column is still > 0
+after the last poll, typing proceeds rather than stalling.
 (4) Closing brackets/quotes in Code Mode simulated typing are sent
 as real key presses (US ANSI keycodes, Shift where needed), not as
 unicode strings: VS Code auto-inserts a closer when an opener is
