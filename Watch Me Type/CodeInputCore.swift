@@ -174,7 +174,7 @@ enum CodeInputCore {
         switch character {
         case ")": return (0x1D, true)   // Shift + 0
         case "]": return (0x1E, false)  // ]
-        case "}": return (0x21, true)   // Shift + [
+        case "}": return (0x1E, true)   // Shift + ] — NOT 0x21: Shift + [ is {
         case "\"": return (0x27, true) // Shift + '
         case "'": return (0x27, false) // '
         default: return nil

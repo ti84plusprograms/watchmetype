@@ -107,8 +107,9 @@ final class CodeModeCoreTests: XCTestCase {
         XCTAssertEqual(CodeInputCore.closingKeyCode(for: ")")?.needsShift, true)
         XCTAssertEqual(CodeInputCore.closingKeyCode(for: "]")?.keyCode, 0x1E)
         XCTAssertEqual(CodeInputCore.closingKeyCode(for: "]")?.needsShift, false)
-        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "}")?.keyCode, 0x21)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "}")?.keyCode, 0x1E)
         XCTAssertEqual(CodeInputCore.closingKeyCode(for: "}")?.needsShift, true)
+        // 0x21 + Shift is {, not } — that was the bug: every } was typed as {.
         XCTAssertEqual(CodeInputCore.closingKeyCode(for: "\"")?.keyCode, 0x27)
         XCTAssertEqual(CodeInputCore.closingKeyCode(for: "\"")?.needsShift, true)
         XCTAssertEqual(CodeInputCore.closingKeyCode(for: "'")?.keyCode, 0x27)
