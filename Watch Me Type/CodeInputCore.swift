@@ -104,14 +104,12 @@ enum CodeInputCore {
     enum NewlineDelivery: Equatable {
         /// Plain Return, as before. Used for prose and as the safe fallback.
         case plainReturn
-        /// Initial simulated Code Mode pass: tagged Escape to dismiss
-        /// completion, deferred Return, then Cmd+Left to line start.
+        /// Simulated Code Mode newline, initial pass and revision pass
+        /// alike: tagged Escape to dismiss completion, deferred Return,
+        /// then Cmd+Left to line start. TypingManager executes the two
+        /// passes with separate deferred work items (typing-phase vs
+        /// editing-phase schedulers), but the decision is the same.
         case dismissCompletionThenReturnThenReset
-        /// Code Mode revision (editing) pass: synchronous Return, then
-        /// Cmd+Left to line start. No Escape dismissal, because the
-        /// deferred Return and pause-retry machinery are tied to the
-        /// typing-phase scheduler, not the editing scheduler.
-        case returnThenReset
     }
 
     /// Decide newline delivery from the caller's phase, without AppKit.
@@ -125,14 +123,19 @@ enum CodeInputCore {
         editing: Bool
     ) -> NewlineDelivery {
         guard codeMode else { return .plainReturn }
-        if initialSimulated { return .dismissCompletionThenReturnThenReset }
-        if editing { return .returnThenReset }
+        if initialSimulated || editing { return .dismissCompletionThenReturnThenReset }
         return .plainReturn
     }
 
     /// Give editors time to process structural keys; WPM remains the base
     /// speed, but bursty punctuation/newlines are deliberately slower.
-    static let suggestionDismissalDelay: TimeInterval = 0.05
+    /// The dismissal delay is deliberately well under the 0.25s newline
+    /// pause, so the deferred Return always fires before the next
+    /// character is scheduled, with margin for a loaded IDE to close
+    /// its completion popup. Raising it further would eat into that
+    /// margin without adding a delivery check, so it is not a fix for
+    /// a Return the IDE drops outright — see README.
+    static let suggestionDismissalDelay: TimeInterval = 0.10
 
     static func minimumDelay(after character: Character) -> TimeInterval {
         if character == "\n" || character == "\r" {

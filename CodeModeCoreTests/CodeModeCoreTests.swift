@@ -91,7 +91,7 @@ final class CodeModeCoreTests: XCTestCase {
         // TypingManager fires after suggestionDismissalDelay, and the
         // next character is not scheduled until minimumDelay after a
         // newline. If either value drifts, that ordering guarantee breaks.
-        XCTAssertEqual(CodeInputCore.suggestionDismissalDelay, 0.05)
+        XCTAssertEqual(CodeInputCore.suggestionDismissalDelay, 0.10)
         XCTAssertEqual(CodeInputCore.minimumDelay(after: "\n"), 0.25)
         XCTAssertGreaterThan(CodeInputCore.minimumDelay(after: "\n"), CodeInputCore.suggestionDismissalDelay)
         XCTAssertEqual(CodeInputCore.minimumDelay(after: "\r"), CodeInputCore.minimumDelay(after: "\n"))
@@ -115,7 +115,7 @@ final class CodeModeCoreTests: XCTestCase {
         )
         XCTAssertEqual(
             CodeInputCore.newlineDelivery(codeMode: true, initialSimulated: false, editing: true),
-            .returnThenReset
+            .dismissCompletionThenReturnThenReset
         )
         // In practice TypingManager passes exactly one phase at a time.
         // Prose and Exact Insert fall back to plain Return.

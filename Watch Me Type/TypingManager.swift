@@ -114,6 +114,10 @@ final class TypingManager: NSObject, ObservableObject {
     // Cancel the deferred Return if typing stops, pauses, or restarts.
     private var pendingCodeNewlineWorkItem: DispatchWorkItem?
     private var pendingCodeNewlineIndex: Int?
+    // Editing-phase equivalent: cancelled on pause/abort/stop. No
+    // index retry here — resume re-executes the current edit (existing
+    // editing behaviour), so the newline is attempted again that way.
+    private var pendingEditNewlineWorkItem: DispatchWorkItem?
     // Synthetic Escape must not trigger Watch Me Type's global Escape-to-pause shortcut.
     private static let syntheticDismissalEscapeTag: Int64 = 0x574D545F455343
     
@@ -309,6 +313,8 @@ final class TypingManager: NSObject, ObservableObject {
         editCharWorkItem = nil
         editCharCompletion = nil
         editCharsToType = []
+        pendingEditNewlineWorkItem?.cancel()
+        pendingEditNewlineWorkItem = nil
 
         stopPeriodicFocusCheck()
         endSleepPrevention()
@@ -979,7 +985,10 @@ final class TypingManager: NSObject, ObservableObject {
     /// the IDE's auto-indent is applied first, then Cmd+Left makes the
     /// source text's own leading spaces the only indent, instead of
     /// compounding into the VS Code staircase.
-    private func sendCodeModeNewline() {
+    /// `isEditing` selects the editing-phase deferred work item and
+    /// guard; the typing phase keeps its pause-retry index, while the
+    /// editing phase relies on resume re-executing the current edit.
+    private func sendCodeModeNewline(isEditing: Bool = false) {
         let source = CGEventSource(stateID: .hidSystemState)
         let escapeKeyCode: CGKeyCode = 0x35 // kVK_Escape
         guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: escapeKeyCode, keyDown: true),
@@ -994,6 +1003,23 @@ final class TypingManager: NSObject, ObservableObject {
         keyUp.setIntegerValueField(.eventSourceUserData, value: Self.syntheticDismissalEscapeTag)
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
+
+        if isEditing {
+            pendingEditNewlineWorkItem?.cancel()
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self = self, self.state == .editing else { return }
+                guard self.isTargetWindowFocused() else {
+                    self.abortEditingWithError(.focusLostDuringEdit)
+                    return
+                }
+                self.pendingEditNewlineWorkItem = nil
+                self.sendReturnKey()
+                self.sendArrowKey(.left, withModifier: .command)
+            }
+            pendingEditNewlineWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + CodeInputCore.suggestionDismissalDelay, execute: workItem)
+            return
+        }
 
         pendingCodeNewlineWorkItem?.cancel()
         pendingCodeNewlineIndex = max(0, currentIndex - 1)
@@ -1024,17 +1050,16 @@ final class TypingManager: NSObject, ObservableObject {
 
         // Code Mode simulated newlines, decided by the pure
         // CodeInputCore.newlineDelivery (SwiftPM-tested) and executed
-        // here. Escape dismissal and its deferred Return (with pause
-        // retry) apply only to the initial simulated pass, because
-        // that retry machinery is tied to typing-phase state
-        // (currentIndex / textToType). The editing phase uses a
-        // separate edit-character scheduler, so it gets the simpler
-        // synchronous form: Return, then the same line-start reset.
-        // That fixes the staircase in revisions without importing the
-        // typing-phase deferred machinery into editing; completion
-        // dismissal during revisions remains an open gap, documented
-        // in README. Prose keeps its previous plain Return, and Exact
-        // Insert does not go through sendCharacter at all.
+        // here. Both the initial simulated pass and the Draft 2/3
+        // revision pass now get Escape dismissal, deferred Return,
+        // then Cmd+Left: the revision pass uses its own deferred work
+        // item (see sendCodeModeNewline(isEditing:)), because the
+        // editing scheduler is separate from the typing scheduler.
+        // Typing-phase pause retry uses currentIndex; editing-phase
+        // pause cancels the deferred Return and resume re-executes
+        // the current edit (existing editing behaviour). Prose keeps
+        // its previous plain Return, and Exact Insert does not go
+        // through sendCharacter at all.
         if character == "\n" || character == "\r" {
             let delivery = CodeInputCore.newlineDelivery(
                 codeMode: isCodeMode,
@@ -1043,10 +1068,7 @@ final class TypingManager: NSObject, ObservableObject {
             )
             switch delivery {
             case .dismissCompletionThenReturnThenReset:
-                sendCodeModeNewline()
-            case .returnThenReset:
-                sendReturnKey()
-                sendArrowKey(.left, withModifier: .command)
+                sendCodeModeNewline(isEditing: state == .editing)
             case .plainReturn:
                 sendReturnKey()
             }
@@ -1897,8 +1919,14 @@ final class TypingManager: NSObject, ObservableObject {
     /// Schedules the next edit character - mirrors scheduleNextCharacter from typing phase
     private func scheduleNextEditChar(after delay: TimeInterval) {
         guard editCharIndex < editCharsToType.count else {
-            // All characters typed - call completion after a final delay
-            let finalDelay = interCharacterDelay * editingDelayMultiplier
+            // All characters typed - call completion after a final delay.
+            // If the last character was a newline, its deferred Return
+            // may still be pending; wait for it before completion, so
+            // the next edit's navigation cannot run ahead of the Return.
+            let baseFinalDelay = interCharacterDelay * editingDelayMultiplier
+            let finalDelay = pendingEditNewlineWorkItem != nil
+                ? max(baseFinalDelay, CodeInputCore.suggestionDismissalDelay + 0.05)
+                : baseFinalDelay
             DispatchQueue.main.asyncAfter(deadline: .now() + finalDelay) { [weak self] in
                 guard let self = self else { return }
                 self.editCharCompletion?()
@@ -1982,6 +2010,10 @@ final class TypingManager: NSObject, ObservableObject {
         editCharWorkItem?.cancel()
         editCharWorkItem = nil
         editCharCompletion = nil
+        // Cancel a deferred revision newline too; resume re-executes
+        // the current edit, so the newline is attempted again there.
+        pendingEditNewlineWorkItem?.cancel()
+        pendingEditNewlineWorkItem = nil
 
         stopPeriodicFocusCheck()
 
@@ -2150,6 +2182,8 @@ final class TypingManager: NSObject, ObservableObject {
         editCharWorkItem?.cancel()
         editCharWorkItem = nil
         editCharCompletion = nil
+        pendingEditNewlineWorkItem?.cancel()
+        pendingEditNewlineWorkItem = nil
 
         stopPeriodicFocusCheck()
         endSleepPrevention()

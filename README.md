@@ -50,7 +50,7 @@ The solution is not better detection; it's building actual relationships with st
 - completion screen: shows typing/editing/total duration, donation options, share link, and quick reset for another run
 - compatible everywhere: types into any macOS text field (Docs, Word, Notes, IDEs, browsers); prevents sleep during sessions; ESC pauses typing and stops editing
 - privacy & localisation: no accounts or tracking; English, Simplified Chinese, and Traditional Chinese localisation
-- updates & stack: Sparkle auto-updates; built with SwiftUI + AppKit (NSTextView), CoreGraphics CGEvent keyboard simulation, Accessibility APIs, and centralised logging
+- updates & stack: in-app updates disabled in this fork (see fork section below); built with SwiftUI + AppKit (NSTextView), CoreGraphics CGEvent keyboard simulation, Accessibility APIs, and centralised logging
 
 ## Requirements
 
@@ -64,7 +64,7 @@ The solution is not better detection; it's building actual relationships with st
 - CoreGraphics (CGEvent) for keyboard event injection
 - macOS Accessibility APIs for focus tracking, target-window locking, and the lazy permission flow
 - a pure Swift diff engine (sentence and word-level LCS), shared between the right-to-left and left-to-right edit planners
-- Sparkle for in-app updates
+- Sparkle code remains in the upstream app, but all update functionality is disabled in this fork (see fork section below)
 - centralised `os.log`-backed logging through the `appLog` global
 - XCTest unit and integration tests covering the diff engine and the three-draft pipeline
 
@@ -72,7 +72,7 @@ The solution is not better detection; it's building actual relationships with st
 
 Source layout under `Watch Me Type/`:
 
-- `Watch_Me_TypeApp.swift` is the entry point. It configures Sparkle and hosts `ContentView`.
+- `Watch_Me_TypeApp.swift` is the entry point. It hosts `ContentView`; Sparkle startup is disabled in this fork, so it does not check for or install updates.
 - `ContentView.swift` carries all UI: draft 1/2/3 editors, settings, overlays, the text-cleanup pipeline, and window management. The custom equal-width column layout, the fused edit-card and editor panels, and the auto-resizing window that adapts to the number of active drafts all live here.
 - `TypingManager.swift` is the `ObservableObject` state machine (`idle → countingDown → typing → editing → paused`). It owns CGEvent injection, focus lock, sleep prevention, the ESC handler, and direction-aware edit execution. The Draft 2 path walks edits backward with backspaces; the Draft 3 path walks edits forward with shift-select-then-backspace and an offset accumulator. Before each destructive edit, the manager checks the live document against an internal snapshot and aborts on mismatch.
 - `EditOperationConverter.swift` is the diff engine, kept deliberately pure: free functions only, no side effects, no imports beyond `Foundation`. A hybrid sentence and word-level LCS produces positioned edits, sortable right-to-left (`.rightToLeft`) or left-to-right (`.leftToRight`) via the `EditSortDirection` enum.
@@ -195,28 +195,40 @@ local unlocked Mac or an authorized self-hosted macOS runner.
 **Code Input** uses an extra compact control inside the existing Typing Speed
 card. **Simulated** types characters individually (with a longer pause after
 newlines, tabs, and brackets to give editors time to process them). In
-Code Mode, simulated newlines now follow a fixed sequence, in order:
-(1) for the initial typing pass only, a tagged synthetic Escape dismisses
-IDE completion so Return cannot accept a suggestion instead of creating
-a newline, with the Return deferred 0.05s and the per-newline pause
-raised to 0.25s so the Return lands before the next character; if typing
-pauses before that Return fires, the newline is retried on resume rather
-than skipped; (2) Return; (3) Cmd+Left to the start of the new line, so
-an IDE's auto-indent does not compound with the source text's own
-leading spaces (previously this produced a staircase indent in VS Code).
-The line-start reset also applies to Draft 2/3 revision newlines, but
-the Escape dismissal and pause retry do not — revisions use a separate
-scheduler and keep a synchronous Return plus the reset. Simulated typing
-still does not verify that the target actually inserted a newline, so a
-Return dropped while focus and state stay normal can still join lines;
-it also does not fix automatic bracket pairing, format-on-type, or
-Return accepting a suggestion during revisions. For simulated typing,
-still disable format-on-type, automatic bracket pairing, and autocorrect
-in the destination editor, and verify in the target IDE first — the
-automated tests do not send keystrokes to an external editor, so they
-cannot catch this class of failure. Disabling completion/auto-indent is
-no longer required for the two failure modes above, but it remains a
-useful fallback if a given IDE behaves differently.
+Code Mode, simulated newlines now follow a fixed sequence, in order,
+in both the initial typing pass and Draft 2/3 revision passes:
+(1) a tagged synthetic Escape dismisses IDE completion so Return
+cannot accept a suggestion instead of creating a newline, with the
+Return deferred 0.10s and the per-newline pause at 0.25s so the Return
+lands before the next character; if initial typing pauses before that
+Return fires, the newline is retried on resume rather than skipped
+(revision pauses cancel the deferred Return and resume re-executes
+the current edit, which attempts the newline again); (2) Return;
+(3) Cmd+Left to the start of the new line, so an IDE's auto-indent
+does not compound with the source text's own leading spaces
+(previously this produced a staircase indent in VS Code).
+
+Goal: with VS Code at its defaults — auto-indent on, completion on,
+`acceptSuggestionOnEnter` on, auto-closing brackets/quotes on,
+format-on-type off, format-on-paste off — the user should not need
+to change IDE settings to get a faithful simulated run. Two default
+behaviours are handled by the IDE itself, not by this app: with
+auto-closing on, VS Code inserts a closer and then overtypes it when
+the app later types that closer, so nested calls and quoted strings
+should net out correctly in VS Code (other editors may duplicate a
+closer — verify, do not assume). Format-on-type is off by default;
+if a user explicitly enables it, the formatter can reindent a line
+after `;` or `}` and this app cannot reliably undo that, so that
+setting remains unsupported. Simulated typing still does not verify
+that the target actually inserted a newline — there is no
+Accessibility read-back of the target document in this app, so a
+Return dropped while focus and state stay normal can still join
+lines. That verification is a separate, per-editor feature, not
+something a timing change can claim. Verify in the target IDE first
+— the automated tests do not send keystrokes to an external editor,
+so they cannot catch this class of failure. Disabling
+completion/auto-indent remains a useful fallback if a given IDE
+behaves differently, but it is no longer the required setup.
 
 **Exact Insert** instead issues a single standard macOS Paste command with
 the complete source text. This avoids per-Return autoindent and per-character
@@ -259,14 +271,20 @@ completion popup (for example `import numpy as np` followed by
 `from submission import RandomForest, load_csv`) into a new empty
 `.py` file. The lines must stay on separate lines — no joined lines,
 and no accepted suggestion text inserted instead of a newline. Repeat
-the same check for a Draft 1 → 2 revision containing a newline, noting
-that revisions do not get the Escape dismissal, only the line-start
-reset.
-3. **Pause-during-newline check:** start a simulated Code Mode run,
+the same check for a Draft 1 → 2 revision containing a newline — revisions
+now get the same Escape dismissal, via a separate deferred work item.
+4. **Default-settings bracket/quote check (VS Code, auto-closing left
+on, format-on-type left off as shipped):** simulated-type a line with
+nested brackets and quoted strings, for example
+`x = foo(bar("a", [1, 2]), "b")`, into a disposable `.py` file. The
+output must contain exactly one of each closer — VS Code overtype
+should absorb the app's closer, not duplicate it. Repeat in a revision.
+5. **Pause-during-newline check:** start a simulated Code Mode run,
 switch focus away just as a newline is due (or press Escape manually
 to pause), then switch back and resume. The pending newline must be
 delivered on resume, not skipped, and no character must be duplicated
-or lost.
+or lost. For revisions, note resume re-executes the current edit, so
+check the whole edit, not just the newline.
 
 If any check fails in a given IDE, do not use simulated typing for
 that IDE yet; use Exact Insert with format-on-paste disabled instead,
