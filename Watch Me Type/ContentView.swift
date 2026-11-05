@@ -1092,10 +1092,36 @@ struct ContentView: View {
                 .font(.headline)
                 .bold()
 
-            Text("Paste these into your workspace .vscode/settings.json (Cmd+Shift+P -> Preferences: Open Workspace Settings (JSON)). They are the VS Code defaults simulated typing is built for — auto-indent and auto-closing on, format-on-type/paste off. Also turn off macOS \"Add period with double-space\" in System Settings > Keyboard > Text Input.")
+            Text("Paste these into your workspace .vscode/settings.json (Cmd+Shift+P -> Preferences: Open Workspace Settings (JSON)). They are the VS Code defaults simulated typing is built for.")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                (Text("Keep on — the app handles these: ")
+                    .font(.caption)
+                    .bold()
+                 + Text("auto-indent, auto-closing brackets/quotes, completion (accept suggestion on Enter).")
+                    .font(.caption))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                (Text("Turn off — the app can't undo these: ")
+                    .font(.caption)
+                    .bold()
+                 + Text("format-on-type and format-on-paste (both are false in the JSON below).")
+                    .font(.caption))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                (Text("Also turn off: ")
+                    .font(.caption)
+                    .bold()
+                 + Text("macOS \"Add period with double-space\" in System Settings > Keyboard > Text Input. It's on by default, a double space in code becomes \". \", and it can't be set from settings.json.")
+                    .font(.caption))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             Text(CodeInputCore.recommendedVSCodeSettingsJSON)
                 .font(.system(.caption, design: .monospaced))
