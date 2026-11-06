@@ -152,25 +152,13 @@ enum CodeInputCore {
     /// the end of the indent and undoes the reset — the app then types
     /// its own spaces on top and the staircase gets worse, which is
     /// exactly what the second-reset attempt (8464a2c) did in testing.
-    ///
-    /// Option B uses these timings for its indent poll instead of a
-    /// Cmd+Left reset: TypingManager reads the cursor column via
-    /// Accessibility after Return, waits for it to stabilise, then
-    /// adjusts it to the source indent. Polls are spaced by
-    /// `lineStartResetPollInterval` and capped at
-    /// `lineStartResetMaxAttempts`, so the whole loop still finishes
-    /// before the next character (0.25s newline pause). Option A's
-    /// closed-loop Cmd+Left reset used the same timings and showed
-    /// no change in testing, so it was replaced by B.
     static let lineStartResetDelay: TimeInterval = 0.05
-    static let lineStartResetPollInterval: TimeInterval = 0.02
-    static let lineStartResetMaxAttempts: Int = 3
 
     /// Recommended VS Code workspace settings for simulated Code
     /// Mode typing, shown in the app so the user can copy-paste
     /// them into `.vscode/settings.json` (Cmd+Shift+P ->
     /// Preferences: Open Workspace Settings (JSON)). These are
-    /// the VS Code defaults option B was built and tested against:
+    /// the VS Code defaults simulated typing is built for:
     /// auto-indent and auto-closing on, format-on-type/paste off,
     /// 4-space indents. They are the settings to use, not a claim
     /// that a run with them has yet passed — see README.
@@ -194,47 +182,6 @@ enum CodeInputCore {
         "editor.insertSpaces": true
     }
     """
-
-    /// Option B (IDE-aware stream): leading indent in spaces, counting
-    /// a tab as 4. Used both for the target indent of the next line
-    /// and for predicting the IDE's auto-indent.
-    static func leadingIndentSpaces(_ line: String) -> Int {
-        var count = 0
-        for ch in line {
-            if ch == " " { count += 1 }
-            else if ch == "\t" { count += 4 }
-            else { break }
-        }
-        return count
-    }
-
-    /// Target indent of the line starting at `index` in `text`
-    /// (the character after a newline), in spaces.
-    static func targetIndentAfterNewline(in text: [Character], at index: Int) -> Int {
-        var count = 0
-        var i = index
-        while i < text.count {
-            if text[i] == " " { count += 1 }
-            else if text[i] == "\t" { count += 4 }
-            else { break }
-            i += 1
-        }
-        return count
-    }
-
-    /// What VS Code's Python auto-indent usually puts on a new line
-    /// after `previousLine`: same indent, plus 4 after a line ending
-    /// in `:`, 0 after a blank line. This is a prediction, not a
-    /// measurement — TypingManager prefers the AX cursor column when
-    /// it can read it, and uses this only when AX gives no column.
-    /// It does not model bracket-continuation indent, so it can be
-    /// off by 4 on continuation lines; that is a documented limit.
-    static func predictedAutoIndent(after previousLine: String) -> Int {
-        if previousLine.trimmingCharacters(in: .whitespaces).isEmpty { return 0 }
-        let base = leadingIndentSpaces(previousLine)
-        if previousLine.trimmingCharacters(in: .whitespaces).hasSuffix(":") { return base + 4 }
-        return base
-    }
 
     /// Real-keycode mapping for closing brackets/quotes in Code Mode
     /// simulated typing, on a US ANSI layout. Returns the virtual key

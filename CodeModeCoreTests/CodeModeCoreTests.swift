@@ -93,11 +93,6 @@ final class CodeModeCoreTests: XCTestCase {
         // newline. If either value drifts, that ordering guarantee breaks.
         XCTAssertEqual(CodeInputCore.suggestionDismissalDelay, 0.10)
         XCTAssertEqual(CodeInputCore.lineStartResetDelay, 0.05)
-        XCTAssertEqual(CodeInputCore.lineStartResetPollInterval, 0.02)
-        XCTAssertEqual(CodeInputCore.lineStartResetMaxAttempts, 3)
-        // Whole closed-loop reset (dismissal + first poll + retries)
-        // must finish before the next character at the 0.25s newline pause.
-        XCTAssertLessThan(CodeInputCore.suggestionDismissalDelay + CodeInputCore.lineStartResetDelay + Double(CodeInputCore.lineStartResetMaxAttempts) * CodeInputCore.lineStartResetPollInterval, CodeInputCore.minimumDelay(after: "\n"))
         XCTAssertLessThan(CodeInputCore.suggestionDismissalDelay + CodeInputCore.lineStartResetDelay, CodeInputCore.minimumDelay(after: "\n"))
         XCTAssertEqual(CodeInputCore.minimumDelay(after: "\n"), 0.25)
         XCTAssertGreaterThan(CodeInputCore.minimumDelay(after: "\n"), CodeInputCore.suggestionDismissalDelay)
@@ -122,21 +117,6 @@ final class CodeModeCoreTests: XCTestCase {
         XCTAssertNil(CodeInputCore.closingKeyCode(for: "("))
         XCTAssertNil(CodeInputCore.closingKeyCode(for: "["))
         XCTAssertNil(CodeInputCore.closingKeyCode(for: "a"))
-    }
-
-    func testOptionBIndentHelpers() {
-        XCTAssertEqual(CodeInputCore.leadingIndentSpaces("    x"), 4)
-        XCTAssertEqual(CodeInputCore.leadingIndentSpaces("x"), 0)
-        XCTAssertEqual(CodeInputCore.leadingIndentSpaces(""), 0)
-        XCTAssertEqual(CodeInputCore.leadingIndentSpaces("\t x"), 5)
-        XCTAssertEqual(CodeInputCore.targetIndentAfterNewline(in: Array("def f():\n    x"), at: 9), 4)
-        XCTAssertEqual(CodeInputCore.targetIndentAfterNewline(in: Array("def f():\n    x"), at: 10), 3)
-        XCTAssertEqual(CodeInputCore.targetIndentAfterNewline(in: Array("x\n"), at: 2), 0)
-        XCTAssertEqual(CodeInputCore.predictedAutoIndent(after: "def f():"), 4)
-        XCTAssertEqual(CodeInputCore.predictedAutoIndent(after: "    return x"), 4)
-        XCTAssertEqual(CodeInputCore.predictedAutoIndent(after: "    if y:"), 8)
-        XCTAssertEqual(CodeInputCore.predictedAutoIndent(after: ""), 0)
-        XCTAssertEqual(CodeInputCore.predictedAutoIndent(after: "   "), 0)
     }
 
     func testRecommendedVSCodeSettingsJSON() throws {
