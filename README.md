@@ -222,28 +222,24 @@ lands before the next character; if initial typing pauses before that
 Return fires, the newline is retried on resume rather than skipped
 (revision pauses cancel the deferred Return and resume re-executes
 the current edit, which attempts the newline again); (2) Return;
-(3) IDE-aware indent (option B, replacing the closed-loop
-Cmd+Left reset in option A, which showed no change in testing):
-after Return, the app does NOT type the next line's leading
-spaces. It reads the cursor column via Accessibility once
-auto-indent has had a chance to land (polls every 0.02s, at
-most 3 attempts, finishing before the next character at 0.25s),
-then adjusts that column to the source line's target indent —
-Backspace for excess indent, spaces for missing indent — and
-skips the source line's leading spaces when they come up.
-If the column cannot be read via AX, it adjusts from the
-predicted auto-indent instead (same indent, +4 after `:`,
-0 after a blank line), so B works even where A silently fell
-back to a timed press. No Home/Cmd+Left press is involved at
-all, so the toggle that made a blind second press undo the
-first cannot occur. If the column is still not the target
-after the last attempt, typing proceeds rather than stalling.
-(4) Closing brackets/quotes in Code Mode simulated typing:
-if the character immediately after the caret is the same
-closer, the IDE auto-inserted it, so the app steps past it
-with Right Arrow instead of typing it. Otherwise the closer
-is sent as a real key press (US ANSI keycodes, Shift where
-needed), not as a unicode string: VS Code auto-inserts a
+(3) a single delayed Cmd+Left to the start of the new line
+(Return 0.10s, reset 0.15s, next character 0.25s), so an IDE's
+auto-indent does not compound with the source text's own
+leading spaces. A second Cmd+Left was tried first and made
+the staircase worse, because VS Code's Home toggles between
+the first non-whitespace character and column 0. Two later
+attempts were reverted before this merge: option A, a
+closed-loop Accessibility cursor-column read-back that
+showed no change in testing, and option B, an IDE-aware
+stream that adjusted the column with Backspace — B deleted
+characters from the previous line when the AX column reading
+was wrong (identical truncation at 100 and 400 WPM proved
+it was logic, not speed), so it was removed. The single
+delayed reset still leaves about half the lines +4 in
+testing, because auto-indent lands at variable latency.
+(4) Closing brackets/quotes in Code Mode simulated typing
+are sent as real key presses (US ANSI keycodes, Shift where
+needed), not as unicode strings: VS Code auto-inserts a
 closer when an opener is typed, but a unicode closer is
 inserted as text and does not trigger overtype, so auto-closers
 get pushed to the end of the line (e.g.
@@ -254,27 +250,31 @@ a string, where VS Code did not auto-close). Openers stay
 unicode, prose is unchanged, and Exact Insert does not go
 through this path.
 
-Goal: with VS Code at its defaults — auto-indent on, completion on,
-`acceptSuggestionOnEnter` on, auto-closing brackets/quotes on,
-format-on-type off, format-on-paste off — the user should not need
-to change IDE settings to get a faithful simulated run. Two default
-behaviours are handled by the IDE itself, not by this app: with
-auto-closing on, VS Code inserts a closer and then overtypes it when
-the app later types that closer, so nested calls and quoted strings
-should net out correctly in VS Code (other editors may duplicate a
-closer — verify, do not assume). Format-on-type is off by default;
-if a user explicitly enables it, the formatter can reindent a line
-after `;` or `}` and this app cannot reliably undo that, so that
-setting remains unsupported. Simulated typing still does not verify
-that the target actually inserted a newline — there is no
-Accessibility read-back of the target document in this app, so a
-Return dropped while focus and state stay normal can still join
-lines. That verification is a separate, per-editor feature, not
-something a timing change can claim. Verify in the target IDE first
-— the automated tests do not send keystrokes to an external editor,
-so they cannot catch this class of failure. Disabling
-completion/auto-indent remains a useful fallback if a given IDE
-behaves differently, but it is no longer the required setup.
+Current state, honestly: with VS Code at its defaults —
+auto-indent on, completion on, `acceptSuggestionOnEnter` on,
+auto-closing brackets/quotes on, format-on-type off,
+format-on-paste off — simulated typing still leaves about
+half the lines +4. The reliable setup for this version is
+the assistance-off settings (auto-indent off, auto-closing
+off, completion off, format-on-type/paste off, macOS "Add
+period with double-space" off), which the app also shows
+in its Code Mode settings card as the copy-paste workspace
+settings. That card's defaults JSON is the target for a
+future fix, not a claim that a run with those settings has
+passed. Format-on-type is off by default; if a user
+explicitly enables it, the formatter can reindent a line
+after `;` or `}` and this app cannot reliably undo that, so
+that setting remains unsupported. Simulated typing still
+does not verify that the target actually inserted a newline
+— there is no Accessibility read-back of the target document
+in this app, so a Return dropped while focus and state stay
+normal can still join lines. That verification is a separate,
+per-editor feature, not something a timing change can claim.
+Verify in the target IDE first — the automated tests do not
+send keystrokes to an external editor, so they cannot catch
+this class of failure. Disabling completion/auto-indent
+remains the reliable setup for this version, not just a
+fallback.
 
 **Exact Insert** instead issues a single standard macOS Paste command with
 the complete source text. This avoids per-Return autoindent and per-character
