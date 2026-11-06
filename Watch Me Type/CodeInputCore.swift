@@ -165,22 +165,20 @@ enum CodeInputCore {
     /// macOS "Add period with double-space" is a system setting,
     /// not in this JSON; it still needs to be off.
     static let recommendedVSCodeSettingsJSON = """
-    {
-        "editor.autoIndent": "full",
-        "editor.acceptSuggestionOnEnter": "on",
-        "editor.suggestOnTriggerCharacters": true,
+        "editor.autoIndent": "none",
+        "editor.acceptSuggestionOnEnter": "off",
+        "editor.suggestOnTriggerCharacters": false,
         "editor.quickSuggestions": {
-            "other": true,
+            "other": false,
             "comments": false,
             "strings": false
         },
-        "editor.autoClosingBrackets": "languageDefined",
-        "editor.autoClosingQuotes": "languageDefined",
+        "editor.autoClosingBrackets": "never",
+        "editor.autoClosingQuotes": "never",
         "editor.formatOnType": false,
         "editor.formatOnPaste": false,
         "editor.tabSize": 4,
         "editor.insertSpaces": true
-    }
     """
 
     /// Real-keycode mapping for closing brackets/quotes in Code Mode
