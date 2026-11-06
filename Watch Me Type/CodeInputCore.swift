@@ -104,14 +104,12 @@ enum CodeInputCore {
     enum NewlineDelivery: Equatable {
         /// Plain Return, as before. Used for prose and as the safe fallback.
         case plainReturn
-        /// Initial simulated Code Mode pass: tagged Escape to dismiss
-        /// completion, deferred Return, then Cmd+Left to line start.
+        /// Simulated Code Mode newline, initial pass and revision pass
+        /// alike: tagged Escape to dismiss completion, deferred Return,
+        /// then Cmd+Left to line start. TypingManager executes the two
+        /// passes with separate deferred work items (typing-phase vs
+        /// editing-phase schedulers), but the decision is the same.
         case dismissCompletionThenReturnThenReset
-        /// Code Mode revision (editing) pass: synchronous Return, then
-        /// Cmd+Left to line start. No Escape dismissal, because the
-        /// deferred Return and pause-retry machinery are tied to the
-        /// typing-phase scheduler, not the editing scheduler.
-        case returnThenReset
     }
 
     /// Decide newline delivery from the caller's phase, without AppKit.
@@ -125,14 +123,92 @@ enum CodeInputCore {
         editing: Bool
     ) -> NewlineDelivery {
         guard codeMode else { return .plainReturn }
-        if initialSimulated { return .dismissCompletionThenReturnThenReset }
-        if editing { return .returnThenReset }
+        if initialSimulated || editing { return .dismissCompletionThenReturnThenReset }
         return .plainReturn
     }
 
     /// Give editors time to process structural keys; WPM remains the base
     /// speed, but bursty punctuation/newlines are deliberately slower.
-    static let suggestionDismissalDelay: TimeInterval = 0.05
+    /// The dismissal delay is deliberately well under the 0.25s newline
+    /// pause, so the deferred Return always fires before the next
+    /// character is scheduled, with margin for a loaded IDE to close
+    /// its completion popup. Raising it further would eat into that
+    /// margin without adding a delivery check, so it is not a fix for
+    /// a Return the IDE drops outright — see README.
+    static let suggestionDismissalDelay: TimeInterval = 0.10
+
+    /// Delay between Return and the (single) Cmd+Left line-start
+    /// reset. VS Code applies auto-indent asynchronously after Return,
+    /// so a Cmd+Left posted immediately after Return can run before
+    /// auto-indent lands and do nothing. Delaying the one reset by
+    /// 0.05s lets auto-indent land first, while still firing before
+    /// the next character (0.25s newline pause).
+    ///
+    /// Do NOT post a second Cmd+Left as a safety net: VS Code's Home
+    /// (Cmd+Left) toggles between the first non-whitespace character
+    /// and column 0. On a blank auto-indented line the first
+    /// non-whitespace position is the end of the indent, so a second
+    /// press after a successful first press moves the cursor back to
+    /// the end of the indent and undoes the reset — the app then types
+    /// its own spaces on top and the staircase gets worse, which is
+    /// exactly what the second-reset attempt (8464a2c) did in testing.
+    static let lineStartResetDelay: TimeInterval = 0.05
+
+    /// Recommended VS Code workspace settings for simulated Code
+    /// Mode typing, shown in the app so the user can copy-paste
+    /// them into `.vscode/settings.json` (Cmd+Shift+P ->
+    /// Preferences: Open Workspace Settings (JSON)). These are
+    /// the VS Code defaults simulated typing is built for:
+    /// auto-indent and auto-closing on, format-on-type/paste off,
+    /// 4-space indents. They are the settings to use, not a claim
+    /// that a run with them has yet passed — see README.
+    /// macOS "Add period with double-space" is a system setting,
+    /// not in this JSON; it still needs to be off.
+    static let recommendedVSCodeSettingsJSON = """
+    {
+        "editor.autoIndent": "full",
+        "editor.acceptSuggestionOnEnter": "on",
+        "editor.suggestOnTriggerCharacters": true,
+        "editor.quickSuggestions": {
+            "other": true,
+            "comments": false,
+            "strings": false
+        },
+        "editor.autoClosingBrackets": "languageDefined",
+        "editor.autoClosingQuotes": "languageDefined",
+        "editor.formatOnType": false,
+        "editor.formatOnPaste": false,
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true
+    }
+    """
+
+    /// Real-keycode mapping for closing brackets/quotes in Code Mode
+    /// simulated typing, on a US ANSI layout. Returns the virtual key
+    /// code and whether Shift is held, or nil for any other character.
+    ///
+    /// Why keycodes, not unicode: VS Code auto-inserts a closer when
+    /// the app types an opener (unicode openers do trigger auto-close),
+    /// but a closer sent as a unicode string is inserted as text and
+    /// does NOT trigger VS Code's overtype of that auto-closer. The
+    /// auto-closers are then pushed to the end of the line as a
+    /// trailing garbage sequence (e.g. `]))))"` after a correct line).
+    /// A closer sent as a real key press is what a human types, so
+    /// VS Code overtypes an auto-closer immediately before the cursor,
+    /// and simply inserts when there is no auto-closer to overtype
+    /// (e.g. inside a string, where VS Code did not auto-close).
+    /// Openers are intentionally left as unicode: they already trigger
+    /// auto-close correctly, and changing them is not needed.
+    static func closingKeyCode(for character: Character) -> (keyCode: UInt16, needsShift: Bool)? {
+        switch character {
+        case ")": return (0x1D, true)   // Shift + 0
+        case "]": return (0x1E, false)  // ]
+        case "}": return (0x1E, true)   // Shift + ] — NOT 0x21: Shift + [ is {
+        case "\"": return (0x27, true) // Shift + '
+        case "'": return (0x27, false) // '
+        default: return nil
+        }
+    }
 
     static func minimumDelay(after character: Character) -> TimeInterval {
         if character == "\n" || character == "\r" {

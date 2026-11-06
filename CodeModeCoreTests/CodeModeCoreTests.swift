@@ -91,13 +91,50 @@ final class CodeModeCoreTests: XCTestCase {
         // TypingManager fires after suggestionDismissalDelay, and the
         // next character is not scheduled until minimumDelay after a
         // newline. If either value drifts, that ordering guarantee breaks.
-        XCTAssertEqual(CodeInputCore.suggestionDismissalDelay, 0.05)
+        XCTAssertEqual(CodeInputCore.suggestionDismissalDelay, 0.10)
+        XCTAssertEqual(CodeInputCore.lineStartResetDelay, 0.05)
+        XCTAssertLessThan(CodeInputCore.suggestionDismissalDelay + CodeInputCore.lineStartResetDelay, CodeInputCore.minimumDelay(after: "\n"))
         XCTAssertEqual(CodeInputCore.minimumDelay(after: "\n"), 0.25)
         XCTAssertGreaterThan(CodeInputCore.minimumDelay(after: "\n"), CodeInputCore.suggestionDismissalDelay)
         XCTAssertEqual(CodeInputCore.minimumDelay(after: "\r"), CodeInputCore.minimumDelay(after: "\n"))
         XCTAssertEqual(CodeInputCore.minimumDelay(after: "\t"), 0.12)
         XCTAssertGreaterThan(CodeInputCore.minimumDelay(after: "{"), 0)
         XCTAssertEqual(CodeInputCore.minimumDelay(after: "a"), 0)
+    }
+
+    func testClosingKeyCodesAreUSANSIAndOpenersAreNotClosers() {
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: ")")?.keyCode, 0x1D)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: ")")?.needsShift, true)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "]")?.keyCode, 0x1E)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "]")?.needsShift, false)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "}")?.keyCode, 0x1E)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "}")?.needsShift, true)
+        // 0x21 + Shift is {, not } — that was the bug: every } was typed as {.
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "\"")?.keyCode, 0x27)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "\"")?.needsShift, true)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "'")?.keyCode, 0x27)
+        XCTAssertEqual(CodeInputCore.closingKeyCode(for: "'")?.needsShift, false)
+        XCTAssertNil(CodeInputCore.closingKeyCode(for: "("))
+        XCTAssertNil(CodeInputCore.closingKeyCode(for: "["))
+        XCTAssertNil(CodeInputCore.closingKeyCode(for: "a"))
+    }
+
+    func testRecommendedVSCodeSettingsJSON() throws {
+        let data = Data(CodeInputCore.recommendedVSCodeSettingsJSON.utf8)
+        let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let settings = try XCTUnwrap(parsed)
+        XCTAssertEqual(settings["editor.autoIndent"] as? String, "full")
+        XCTAssertEqual(settings["editor.acceptSuggestionOnEnter"] as? String, "on")
+        XCTAssertEqual(settings["editor.autoClosingBrackets"] as? String, "languageDefined")
+        XCTAssertEqual(settings["editor.autoClosingQuotes"] as? String, "languageDefined")
+        XCTAssertEqual(settings["editor.formatOnType"] as? Bool, false)
+        XCTAssertEqual(settings["editor.formatOnPaste"] as? Bool, false)
+        XCTAssertEqual(settings["editor.tabSize"] as? Int, 4)
+        XCTAssertEqual(settings["editor.insertSpaces"] as? Bool, true)
+        let quick = try XCTUnwrap(settings["editor.quickSuggestions"] as? [String: Any])
+        XCTAssertEqual(quick["other"] as? Bool, true)
+        XCTAssertEqual(quick["comments"] as? Bool, false)
+        XCTAssertEqual(quick["strings"] as? Bool, false)
     }
 
     func testIntegratedNewlineDeliveryDecisions() {
@@ -115,7 +152,7 @@ final class CodeModeCoreTests: XCTestCase {
         )
         XCTAssertEqual(
             CodeInputCore.newlineDelivery(codeMode: true, initialSimulated: false, editing: true),
-            .returnThenReset
+            .dismissCompletionThenReturnThenReset
         )
         // In practice TypingManager passes exactly one phase at a time.
         // Prose and Exact Insert fall back to plain Return.

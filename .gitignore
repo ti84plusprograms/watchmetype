@@ -1,5 +1,6 @@
-# Markdown files
-*.md
+# Do NOT ignore Markdown: docs in this repo are tracked (README, CHECKPOINT
+# files, etc.). The upstream *.md ignore silently dropped new docs, so it
+# was removed. If a generated .md file ever needs ignoring, list it by name.
 
 # AI-generated / Claude Code context
 .claude/

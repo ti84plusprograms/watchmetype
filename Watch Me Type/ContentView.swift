@@ -484,6 +484,7 @@ struct ContentView: View {
     @State private var showEditingError: Bool = false
     @State private var editingErrorMessage: String = ""
     @State private var shareLinkCopied: Bool = false
+    @State private var vsCodeSettingsCopied: Bool = false
     @State private var showWeChatPayOverlay: Bool = false
     @State private var showHumanizeSheet: Bool = false
     @State private var showHowItWorksSheet: Bool = false
@@ -989,6 +990,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     if codeMode {
                         codeFormattingNotice
+                        vsCodeSettingsCard
                     } else {
                         cleanUpCard
                     }
@@ -1073,6 +1075,86 @@ struct ContentView: View {
         )
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("codeFormattingNotice")
+    }
+
+    /// VS Code workspace settings for simulated Code Mode typing.
+    /// The app has no View tab, so this lives in the Code Mode
+    /// settings column, where the user sets up a run. Copy pastes
+    /// the JSON to the clipboard; the user pastes it into
+    /// `.vscode/settings.json` via Cmd+Shift+P -> Preferences:
+    /// Open Workspace Settings (JSON). Workspace settings override
+    /// the user's global settings for that folder only, so nothing
+    /// global needs reverting afterwards.
+    @ViewBuilder
+    private var vsCodeSettingsCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("VS Code settings", systemImage: "doc.on.doc")
+                .font(.headline)
+                .bold()
+
+            Text("Paste these into your workspace .vscode/settings.json (Cmd+Shift+P -> Preferences: Open Workspace Settings (JSON)). They are the VS Code defaults simulated typing is built for.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                (Text("Leave on — built for these defaults, not yet proven on a Mac test: ")
+                    .font(.caption)
+                    .bold()
+                 + Text("auto-indent, auto-closing brackets/quotes, completion (accept suggestion on Enter).")
+                    .font(.caption))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                (Text("Turn off — the app can't undo these: ")
+                    .font(.caption)
+                    .bold()
+                 + Text("format-on-type and format-on-paste (both are false in the JSON below).")
+                    .font(.caption))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                (Text("Also turn off: ")
+                    .font(.caption)
+                    .bold()
+                 + Text("macOS \"Add period with double-space\" in System Settings > Keyboard > Text Input. It's on by default, a double space in code becomes \". \", and it can't be set from settings.json.")
+                    .font(.caption))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text(CodeInputCore.recommendedVSCodeSettingsJSON)
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.secondary.opacity(0.08))
+                )
+                .accessibilityIdentifier("vsCodeSettingsJSON")
+
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(CodeInputCore.recommendedVSCodeSettingsJSON, forType: .string)
+                vsCodeSettingsCopied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    vsCodeSettingsCopied = false
+                }
+            } label: {
+                Label(vsCodeSettingsCopied ? "Copied" : "Copy settings.json", systemImage: vsCodeSettingsCopied ? "checkmark" : "doc.on.clipboard")
+                    .font(.subheadline)
+            }
+            .buttonStyle(HoverHighlightButtonStyle(isEnabled: true))
+            .accessibilityIdentifier("copyVSCodeSettingsButton")
+            .accessibilityHint("Copies the recommended VS Code workspace settings to the clipboard")
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+        )
     }
 
     @ViewBuilder
@@ -1196,7 +1278,7 @@ struct ContentView: View {
                     .help("Occasionally type an incorrect letter and correct it.")
 
                 if codeMode && codeInputStrategy == .simulated {
-                    Text("Preserves source whitespace. Simulated newlines dismiss completion, then reset to the start of the line, so IDE auto-indent should not compound with the source indent. Still disable auto-format and bracket completion in the target IDE, and verify in a disposable file first — revisions do not get the completion dismissal, only the line-start reset.")
+                    Text("Preserves source whitespace. Simulated newlines dismiss completion, then a single delayed Cmd+Left resets to the start of the line, in both initial typing and revisions, so IDE auto-indent should not compound with the source indent — in testing this still leaves about half the lines +4, so verify in a disposable file first. Closers are sent as real key presses so VS Code overtypes auto-closers. Format-on-type, if explicitly enabled, is still unsupported.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
